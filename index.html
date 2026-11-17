@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d3a5c">
+  <meta name="description" content="Lançamento de gastos de viagem do grupo">
+  <title>Controle de Gastos</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icones/icone-192.png">
+  <link rel="apple-touch-icon" href="icones/icone-192.png">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+  <!-- ============ PRIMEIRO ACESSO ============ -->
+  <section id="tela-boas-vindas" class="tela oculto">
+    <div class="boas-vindas">
+      <img src="icones/icone-192.png" alt="" class="logo">
+      <h1>Controle de Gastos</h1>
+      <p>Para começar, informe seu nome e o código do grupo.</p>
+      <label for="bv-nome">Nome e sobrenome</label>
+      <input id="bv-nome" autocomplete="name" autocapitalize="words" placeholder="Ex.: Maria Silva">
+      <label for="bv-codigo">Código do grupo</label>
+      <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+      <button id="bv-comecar" class="botao primario grande">Começar</button>
+      <p id="bv-erro" class="erro"></p>
+      <p class="dica">Confira o nome antes de continuar: ele aparece em todos os seus lançamentos.</p>
+    </div>
+  </section>
+
+  <!-- ============ INÍCIO ============ -->
+  <section id="tela-inicio" class="tela oculto">
+    <header class="topo">
+      <div>
+        <div class="topo-titulo">Controle de Gastos</div>
+        <div class="topo-sub" id="ini-nome"></div>
+      </div>
+      <button id="ini-config" class="botao-icone" aria-label="Configurações">⚙️</button>
+    </header>
+
+    <div class="barra-sync" id="barra-sync">
+      <div class="sync-texto">
+        <span id="sync-status">—</span>
+        <small id="sync-detalhe"></small>
+      </div>
+      <button id="btn-sync" class="botao pequeno">Sincronizar</button>
+    </div>
+
+    <div id="alertas"></div>
+
+    <div class="acoes-principais">
+      <button id="btn-voz" class="botao primario grande">🎤 Lançar por voz</button>
+      <button id="btn-texto" class="botao secundario grande">✏️ Lançar por texto</button>
+    </div>
+
+    <div class="totais" id="totais"></div>
+    <div id="lista"></div>
+  </section>
+
+  <!-- ============ FORMULÁRIO (novo, editar, revisar) ============ -->
+  <section id="tela-form" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="form-voltar" aria-label="Voltar">←</button>
+      <div class="topo-titulo" id="form-titulo">Novo lançamento</div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <div id="form-ia"></div>
+
+      <label for="f-data">Data e hora</label>
+      <input type="datetime-local" id="f-data">
+
+      <label for="f-desc">Descrição</label>
+      <input id="f-desc" placeholder="Ex.: Almoço no restaurante" autocapitalize="sentences">
+
+      <label>Itens <small>(opcional)</small></label>
+      <div id="f-itens"></div>
+      <button class="botao pequeno" id="f-add-item" type="button">+ Adicionar item</button>
+
+      <label for="f-valor">Valor total (R$)</label>
+      <input id="f-valor" inputmode="decimal" placeholder="0,00">
+      <small class="dica" id="f-soma"></small>
+
+      <label for="f-cat">Categoria</label>
+      <select id="f-cat"></select>
+
+      <label for="f-meio">Meio de pagamento</label>
+      <select id="f-meio"></select>
+
+      <div class="duas-colunas">
+        <div>
+          <label for="f-banco">Banco/conta <small>(opcional)</small></label>
+          <input id="f-banco" placeholder="Ex.: Santander">
+        </div>
+        <div>
+          <label for="f-titular">Titular <small>(opcional)</small></label>
+          <input id="f-titular" placeholder="Ex.: João" autocapitalize="words">
+        </div>
+      </div>
+
+      <label for="f-estab">Estabelecimento <small>(opcional)</small></label>
+      <input id="f-estab" placeholder="Ex.: Restaurante Sabor da Serra">
+
+      <label>Fotos da nota ou comprovante</label>
+      <div class="fotos" id="f-fotos"></div>
+      <div class="linha-botoes">
+        <label class="botao pequeno arquivo">📷 Tirar foto<input type="file" accept="image/*" capture="environment" id="f-camera"></label>
+        <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="f-galeria"></label>
+      </div>
+
+      <div class="gps" id="f-gps"></div>
+
+      <div class="rodape-form">
+        <button class="botao primario grande" id="form-salvar">Salvar</button>
+        <button class="botao perigo" id="form-excluir">Excluir lançamento</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GRAVAÇÃO DE VOZ ============ -->
+  <section id="tela-voz" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="voz-voltar" aria-label="Voltar">←</button>
+      <div class="topo-titulo">Lançar por voz</div>
+      <span></span>
+    </header>
+    <div class="conteudo centro">
+      <p class="dica-voz">Fale o que comprou, o valor e como pagou.<br><i>Ex.: “Almocei 45 e comprei uma água de 5, paguei no PIX do Santander.”</i></p>
+      <button id="voz-mic" class="mic" aria-label="Gravar">🎤</button>
+      <div id="voz-tempo" class="voz-tempo">Toque para gravar</div>
+      <div id="voz-previa" class="oculto">
+        <audio id="voz-audio" controls></audio>
+        <button class="botao pequeno" id="voz-regravar">Gravar de novo</button>
+      </div>
+
+      <label>Fotos da nota ou comprovante <small>(opcional)</small></label>
+      <div class="fotos" id="voz-fotos"></div>
+      <div class="linha-botoes">
+        <label class="botao pequeno arquivo">📷 Tirar foto<input type="file" accept="image/*" capture="environment" id="voz-camera"></label>
+        <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="voz-galeria"></label>
+      </div>
+      <div class="gps" id="voz-gps"></div>
+
+      <button class="botao primario grande" id="voz-salvar" disabled>Salvar</button>
+    </div>
+  </section>
+
+  <!-- ============ CONFIGURAÇÕES ============ -->
+  <section id="tela-config" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="cfg-voltar" aria-label="Voltar">←</button>
+      <div class="topo-titulo">Configurações</div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <label for="cfg-nome">Seu nome e sobrenome</label>
+      <input id="cfg-nome" autocapitalize="words">
+      <small class="dica" id="cfg-nome-servidor"></small>
+
+      <label for="cfg-codigo">Código do grupo</label>
+      <input id="cfg-codigo" autocapitalize="off">
+
+      <button class="botao primario" id="cfg-salvar">Salvar</button>
+
+      <h3>Informações</h3>
+      <dl class="info" id="cfg-info"></dl>
+
+      <div class="linha-botoes">
+        <button class="botao" id="cfg-sync">Sincronizar agora</button>
+        <button class="botao" id="cfg-atualizar">Procurar atualização do app</button>
+      </div>
+      <p class="dica">No Wi-Fi o app envia tudo sozinho enquanto estiver aberto. Nos dados móveis, use o botão Sincronizar.</p>
+    </div>
+  </section>
+
+  <div id="toast" class="toast oculto"></div>
+  <div id="dialogo"></div>
+
+  <script src="config.js"></script>
+  <script src="banco.js"></script>
+  <script src="api.js"></script>
+  <script src="gravador.js"></script>
+  <script src="fotos.js"></script>
+  <script src="sincronizacao.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
