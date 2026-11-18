@@ -2,7 +2,7 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v1.0.0';
+const VERSAO = 'gastos-v1.1.0';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const ARQUIVOS = [
   './api.js',
   './gravador.js',
   './fotos.js',
+  './recorte.js',
   './sincronizacao.js',
   './app.js',
   './manifest.webmanifest',
@@ -21,7 +22,8 @@ const ARQUIVOS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSAO).then(c => c.addAll(ARQUIVOS)));
+  // cache: 'reload' busca direto da internet (sem cópias velhas guardadas pelo navegador)
+  e.waitUntil(caches.open(VERSAO).then(c => c.addAll(ARQUIVOS.map(u => new Request(u, { cache: 'reload' })))));
 });
 
 self.addEventListener('activate', (e) => {

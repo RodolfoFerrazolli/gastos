@@ -13,39 +13,54 @@
 </head>
 <body>
 
-  <!-- ============ PRIMEIRO ACESSO ============ -->
+  <!-- ============ CONTA: criar ou entrar ============ -->
   <section id="tela-boas-vindas" class="tela oculto">
     <div class="boas-vindas">
+      <div id="bv-chrome"></div>
       <img src="icones/icone-192.png" alt="" class="logo">
       <h1>Controle de Gastos</h1>
-      <p>Para começar, informe seu nome e o código do grupo.</p>
+      <p id="bv-intro">Crie sua conta ou entre, se você já tem uma.</p>
+      <div class="abas-conta" role="tablist">
+        <button id="bv-aba-criar" class="ativa" type="button" role="tab">Criar conta</button>
+        <button id="bv-aba-entrar" type="button" role="tab">Já tenho conta</button>
+      </div>
       <label for="bv-nome">Nome e sobrenome</label>
-      <input id="bv-nome" autocomplete="name" autocapitalize="words" placeholder="Ex.: Maria Silva">
+      <input id="bv-nome" autocomplete="username" autocapitalize="words" placeholder="Ex.: Maria Silva">
+      <label for="bv-senha">Senha</label>
+      <input id="bv-senha" type="password" autocomplete="new-password" placeholder="Mínimo 4 dígitos ou letras">
+      <div id="bv-bloco-confirma">
+        <label for="bv-senha2">Repita a senha</label>
+        <input id="bv-senha2" type="password" autocomplete="new-password">
+      </div>
+      <label class="marcar"><input type="checkbox" id="bv-mostrar"> Mostrar senha</label>
       <label for="bv-codigo">Código do grupo</label>
       <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
-      <button id="bv-comecar" class="botao primario grande">Começar</button>
+      <button id="bv-comecar" class="botao primario grande">Criar conta</button>
       <p id="bv-erro" class="erro"></p>
-      <p class="dica">Confira o nome antes de continuar: ele aparece em todos os seus lançamentos.</p>
+      <p class="dica" id="bv-dica">Guarde o nome e a senha: com eles você entra na sua conta em qualquer celular.</p>
     </div>
   </section>
 
   <!-- ============ INÍCIO ============ -->
   <section id="tela-inicio" class="tela oculto">
     <header class="topo">
-      <div>
+      <div class="topo-textos">
         <div class="topo-titulo">Controle de Gastos</div>
         <div class="topo-sub" id="ini-nome"></div>
       </div>
-      <button id="ini-config" class="botao-icone" aria-label="Configurações">⚙️</button>
-    </header>
-
-    <div class="barra-sync" id="barra-sync">
-      <div class="sync-texto">
-        <span id="sync-status">—</span>
-        <small id="sync-detalhe"></small>
+      <div class="topo-acoes">
+        <div class="sync-wrap">
+          <button id="btn-sync" class="botao-icone sync pendente" aria-label="Sincronizar" title="Sincronizar">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+            </svg>
+            <span id="sync-contador" class="sync-contador oculto"></span>
+          </button>
+          <span id="sync-rotulo" class="sync-rotulo oculto" role="status" aria-live="polite"></span>
+        </div>
+        <button id="ini-config" class="botao-icone" aria-label="Configurações" title="Configurações">⚙️</button>
       </div>
-      <button id="btn-sync" class="botao pequeno">Sincronizar</button>
-    </div>
+    </header>
 
     <div id="alertas"></div>
 
@@ -91,7 +106,7 @@
       <div class="duas-colunas">
         <div>
           <label for="f-banco">Banco/conta <small>(opcional)</small></label>
-          <input id="f-banco" placeholder="Ex.: Santander">
+          <input id="f-banco" placeholder="Ex.: Nubank">
         </div>
         <div>
           <label for="f-titular">Titular <small>(opcional)</small></label>
@@ -100,7 +115,7 @@
       </div>
 
       <label for="f-estab">Estabelecimento <small>(opcional)</small></label>
-      <input id="f-estab" placeholder="Ex.: Restaurante Sabor da Serra">
+      <input id="f-estab" placeholder="Ex.: Restaurante Monte Sinai">
 
       <label>Fotos da nota ou comprovante</label>
       <div class="fotos" id="f-fotos"></div>
@@ -126,7 +141,7 @@
       <span></span>
     </header>
     <div class="conteudo centro">
-      <p class="dica-voz">Fale o que comprou, o valor e como pagou.<br><i>Ex.: “Almocei 45 e comprei uma água de 5, paguei no PIX do Santander.”</i></p>
+      <p class="dica-voz">Fale o que comprou, o valor e como pagou.<br><i>Ex.: “Almocei no restaurante Monte Sinai, o prato ficou R$ 45 e tomei uma coca que custou R$ 10, paguei no meu cartão da Nubank.”</i></p>
       <button id="voz-mic" class="mic" aria-label="Gravar">🎤</button>
       <div id="voz-tempo" class="voz-tempo">Toque para gravar</div>
       <div id="voz-previa" class="oculto">
@@ -154,14 +169,12 @@
       <span></span>
     </header>
     <div class="conteudo">
-      <label for="cfg-nome">Seu nome e sobrenome</label>
-      <input id="cfg-nome" autocapitalize="words">
-      <small class="dica" id="cfg-nome-servidor"></small>
+      <label>Sua conta</label>
+      <div class="conta-info" id="cfg-conta"></div>
 
       <label for="cfg-codigo">Código do grupo</label>
       <input id="cfg-codigo" autocapitalize="off">
-
-      <button class="botao primario" id="cfg-salvar">Salvar</button>
+      <button class="botao primario" id="cfg-salvar">Salvar código</button>
 
       <h3>Informações</h3>
       <dl class="info" id="cfg-info"></dl>
@@ -170,9 +183,33 @@
         <button class="botao" id="cfg-sync">Sincronizar agora</button>
         <button class="botao" id="cfg-atualizar">Procurar atualização do app</button>
       </div>
-      <p class="dica">No Wi-Fi o app envia tudo sozinho enquanto estiver aberto. Nos dados móveis, use o botão Sincronizar.</p>
+      <p class="dica">No Wi-Fi o app envia tudo sozinho enquanto estiver aberto. Nos dados móveis, toque nas setas no alto da tela inicial.</p>
+
+      <h3>Outro celular</h3>
+      <p class="dica">Para usar o app em outro celular, entre com o mesmo nome e senha. Seus lançamentos aparecem lá também.</p>
+      <button class="botao perigo" id="cfg-sair">Sair da conta neste celular</button>
     </div>
   </section>
+
+  <!-- ============ RECORTE DE FOTO ============ -->
+  <div id="recorte" class="recorte oculto" role="dialog" aria-label="Recortar a foto">
+    <div class="recorte-topo">
+      <div><b id="recorte-titulo">Recortar a foto</b><small>Arraste os cantos ou o meio da seleção</small></div>
+      <button id="recorte-descartar" class="botao pequeno escuro" type="button">Descartar</button>
+    </div>
+    <div class="recorte-area" id="recorte-area">
+      <canvas id="recorte-canvas"></canvas>
+      <div id="recorte-caixa" class="recorte-caixa">
+        <span class="alca" data-alca="nw"></span><span class="alca" data-alca="ne"></span>
+        <span class="alca" data-alca="sw"></span><span class="alca" data-alca="se"></span>
+      </div>
+    </div>
+    <div class="recorte-botoes">
+      <button id="recorte-girar" class="botao escuro" type="button">↻ Girar</button>
+      <button id="recorte-inteira" class="botao escuro" type="button">Foto inteira</button>
+      <button id="recorte-usar" class="botao primario" type="button">Usar foto</button>
+    </div>
+  </div>
 
   <div id="toast" class="toast oculto"></div>
   <div id="dialogo"></div>
@@ -182,6 +219,7 @@
   <script src="api.js"></script>
   <script src="gravador.js"></script>
   <script src="fotos.js"></script>
+  <script src="recorte.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="app.js"></script>
 </body>

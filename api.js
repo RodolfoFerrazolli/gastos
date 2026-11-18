@@ -1,6 +1,10 @@
 // =====================================================================
 //  COMUNICAÇÃO COM O SERVIDOR (Apps Script)
 // =====================================================================
+// Versão do app (fica aqui, e não no config.js, para o config.js de quem já
+// instalou continuar valendo nas atualizações).
+const VERSAO_DO_APP = '1.1.0';
+
 const Api = (() => {
   class ErroRede extends Error {}
   class ErroServidor extends Error {
@@ -11,7 +15,7 @@ const Api = (() => {
   }
 
   // Erros que impedem qualquer sincronização (não adianta tentar o próximo item).
-  const ERROS_GERAIS = ['codigo_invalido', 'servidor_nao_configurado', 'sem_url', 'resposta_invalida', 'aparelho_invalido'];
+  const ERROS_GERAIS = ['codigo_invalido', 'servidor_nao_configurado', 'sem_url', 'resposta_invalida', 'aparelho_invalido', 'sessao_invalida'];
 
   function urlConfigurada() {
     const u = (typeof CONFIG !== 'undefined' && CONFIG.URL_SERVIDOR) || '';
@@ -27,9 +31,8 @@ const Api = (() => {
       acao,
       codigo: p.codigo,
       aparelhoId: p.aparelhoId,
-      nome: p.nome,
-      versaoApp: CONFIG.VERSAO_APP
-    }, dados);
+      versaoApp: VERSAO_DO_APP
+    }, p.token ? { token: p.token } : {}, dados);
 
     const controle = new AbortController();
     const relogio = setTimeout(() => controle.abort(), tempoMs);

@@ -65,6 +65,7 @@ const Banco = (() => {
 
   const gravar = (store, obj) => escrever(store, s => s.put(obj)).then(() => obj);
   const apagar = (store, chave) => escrever(store, s => s.delete(chave));
+  const limpar = (store) => escrever(store, s => s.clear());
 
   async function lerConfig(chave, padrao) {
     const r = await obter('config', chave);
@@ -72,10 +73,11 @@ const Banco = (() => {
   }
   const gravarConfig = (chave, valor) => gravar('config', { chave, valor });
 
-  return { abrir, obter, todos, porIndice, gravar, apagar, lerConfig, gravarConfig };
+  return { abrir, obter, todos, porIndice, gravar, apagar, limpar, lerConfig, gravarConfig };
 })();
 
-// Perfil deste aparelho: nome, código do grupo e identificador do aparelho.
+// Perfil deste aparelho: identificador do aparelho, código do grupo e a conta
+// conectada (contaId, nome e a sessão "token"; sem token = precisa entrar).
 const Perfil = {
   _cache: null,
   async obter() {

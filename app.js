@@ -13,6 +13,7 @@
   let swEsperando = null;
   let pedimosAtualizacao = false;
   let agendado = null;
+  let aparelhoNovo = null; // identificador criado no primeiro acesso, antes de existir perfil
 
   // ------------------------------------------------------------------
   //  Utilidades
@@ -83,6 +84,9 @@
   function nomeValido(n) {
     return n.length >= 4 && n.split(' ').filter(Boolean).length >= 2;
   }
+  function plural(n, um, varios) {
+    return n === 1 ? um : varios.replace('#', n);
+  }
   function urlDe(blob) {
     const u = URL.createObjectURL(blob);
     urlsTemporarias.push(u);
@@ -99,6 +103,10 @@
     t.classList.remove('oculto');
     clearTimeout(toastRelogio);
     toastRelogio = setTimeout(() => t.classList.add('oculto'), ms);
+  }
+  function toastSalvo(msg) {
+    if (Sync.conexao() === 'wifi') toast(msg + '.');
+    else toast(msg + ' no celular. Para enviar, toque nas setas vermelhas lá em cima.', 5000);
   }
   function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
     return new Promise((ok) => {
@@ -143,6 +151,32 @@
   }
 
   // ------------------------------------------------------------------
+  //  Navegador: o app deve ser instalado pelo Google Chrome. Outros
+  //  navegadores (Samsung Internet, Edge, Opera, Firefox...) geram um
+  //  instalador próprio que o Play Protect bloqueia como "app de risco".
+  // ------------------------------------------------------------------
+  function navegadorNaoChrome() {
+    const ua = navigator.userAgent || '';
+    if (!/Android/i.test(ua)) return false;
+    if (/SamsungBrowser|EdgA\/|OPR\/|OPX\/|Opera|Firefox\/|YaBrowser|UCBrowser|MiuiBrowser|HuaweiBrowser|HeyTapBrowser|VivoBrowser|DuckDuckGo|; wv\)/i.test(ua)) return true;
+    // navegadores que se apresentam como Chrome no texto, mas dizem o próprio nome nas "marcas" (ex.: Brave)
+    const uad = navigator.userAgentData;
+    const marcas = (uad && Array.isArray(uad.brands)) ? uad.brands.map(b => b.brand).join(' | ') : '';
+    return /Samsung|Edge|Opera|Brave|Yandex|DuckDuckGo|Vivaldi|Kiwi|Mi Browser|Huawei/i.test(marcas);
+  }
+  function linkAbrirNoChrome(codigo) {
+    const u = new URL(location.href);
+    u.hash = '';
+    if (codigo) u.searchParams.set('codigo', codigo);
+    const reserva = 'https://play.google.com/store/apps/details?id=com.android.chrome';
+    return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${u.protocol.replace(':', '')};package=com.android.chrome;` +
+      `S.browser_fallback_url=${encodeURIComponent(reserva)};end`;
+  }
+  function mostrarAvisoChrome() {
+    return navegadorNaoChrome() && !estaInstalado();
+  }
+
+  // ------------------------------------------------------------------
   //  Navegação (o botão "voltar" do Android também funciona)
   // ------------------------------------------------------------------
   function mostrarTela(nome, { empilhar = true } = {}) {
@@ -164,6 +198,12 @@
     return true;
   }
   window.addEventListener('popstate', async () => {
+    if (Recorte.aberto()) {
+      // "voltar" com a tela de recorte aberta: só fecha o recorte
+      Recorte.cancelar();
+      history.pushState({ tela: telaAtual }, '');
+      return;
+    }
     if (telaAtual === 'inicio' || telaAtual === 'boas-vindas') return;
     if (await podeSairDaTela()) exibirInicio();
     else history.pushState({ tela: telaAtual }, '');
@@ -186,50 +226,150 @@
   }
 
   // ------------------------------------------------------------------
-  //  Primeiro acesso
+  //  Conta: criar ou entrar (nome e sobrenome + senha + código do grupo)
   // ------------------------------------------------------------------
-  function iniciarBoasVindas() {
+  const Conta = { modo: 'criar' };
+  const INTRO = {
+    novo: 'Crie sua conta ou entre, se você já tem uma.',
+    migracao: 'Novidade: agora cada pessoa tem uma conta com nome e senha, para poder usar o app em outro celular. Crie a sua para continuar. Os lançamentos deste celular continuam aqui.',
+    sessao: 'Sua sessão terminou. Entre de novo na sua conta.',
+    saiu: 'Você saiu da conta neste celular. Entre com seu nome e senha, ou crie uma conta.'
+  };
+
+  function motivoEntrada(p) {
+    if (!p) return 'novo';
+    if (p.sessaoInvalida) return 'sessao';
+    if (!p.contaId && (p.nome || p.registrado)) return 'migracao';
+    if (p.saiuEm) return 'saiu';
+    return 'novo';
+  }
+
+  function modoConta(modo) {
+    Conta.modo = modo;
+    const criar = modo === 'criar';
+    $('bv-aba-criar').classList.toggle('ativa', criar);
+    $('bv-aba-entrar').classList.toggle('ativa', !criar);
+    $('bv-aba-criar').setAttribute('aria-selected', String(criar));
+    $('bv-aba-entrar').setAttribute('aria-selected', String(!criar));
+    $('bv-bloco-confirma').classList.toggle('oculto', !criar);
+    $('bv-senha').setAttribute('autocomplete', criar ? 'new-password' : 'current-password');
+    $('bv-senha').placeholder = criar ? 'Mínimo 4 dígitos ou letras' : 'Sua senha';
+    $('bv-comecar').textContent = criar ? 'Criar conta' : 'Entrar';
+    $('bv-dica').textContent = criar
+      ? 'Guarde o nome e a senha: com eles você entra na sua conta em qualquer celular.'
+      : 'Esqueceu a senha? Peça ao organizador para definir uma nova.';
+    $('bv-erro').textContent = '';
+  }
+  $('bv-aba-criar').onclick = () => modoConta('criar');
+  $('bv-aba-entrar').onclick = () => modoConta('entrar');
+  $('bv-mostrar').onchange = () => {
+    const tipo = $('bv-mostrar').checked ? 'text' : 'password';
+    $('bv-senha').type = tipo;
+    $('bv-senha2').type = tipo;
+  };
+  $('bv-codigo').addEventListener('input', () => renderAvisoChromeBoasVindas());
+  ['bv-nome', 'bv-senha', 'bv-senha2', 'bv-codigo'].forEach(id => {
+    $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('bv-comecar').click(); } });
+  });
+
+  function avisoChromeHtml(codigo, classe) {
+    return `<div class="${classe}"><span><b>Use o Google Chrome.</b> Instalado por este navegador, o app é bloqueado pelo Play Protect como “app de risco”. Pelo Chrome ele instala sem esse aviso.</span>` +
+      `<a class="botao pequeno" href="${esc(linkAbrirNoChrome(codigo))}">Abrir no Chrome</a></div>`;
+  }
+  function renderAvisoChromeBoasVindas() {
+    $('bv-chrome').innerHTML = mostrarAvisoChrome() ? avisoChromeHtml($('bv-codigo').value.trim(), 'aviso-chrome') : '';
+  }
+
+  async function iniciarBoasVindas(motivo = 'novo') {
+    const p = await Perfil.obter();
     const params = new URLSearchParams(location.search);
-    if (params.get('codigo')) $('bv-codigo').value = params.get('codigo');
+    $('bv-intro').textContent = INTRO[motivo] || INTRO.novo;
+    $('bv-nome').value = motivo === 'migracao' ? (p.nomeServidor || p.nome || '') : motivo === 'sessao' ? (p.nome || '') : '';
+    $('bv-senha').value = '';
+    $('bv-senha2').value = '';
+    $('bv-mostrar').checked = false;
+    $('bv-senha').type = 'password';
+    $('bv-senha2').type = 'password';
+    $('bv-codigo').value = params.get('codigo') || (p && p.codigo) || '';
+    modoConta(motivo === 'sessao' || motivo === 'saiu' ? 'entrar' : 'criar');
+    renderAvisoChromeBoasVindas();
     mostrarTela('boas-vindas', { empilhar: false });
   }
 
+  function mensagemErroConta(e) {
+    if (e instanceof Api.ErroRede) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
+    if (e.codigo === 'codigo_invalido') return 'Código do grupo inválido. Confira com o organizador.';
+    if (e.codigo === 'senha_incorreta') return 'Senha incorreta. Se esqueceu, peça ao organizador para definir uma nova senha.';
+    if (e.codigo === 'acao_desconhecida') return 'O servidor ainda está na versão antiga. Avise o organizador para atualizar o código no Apps Script.';
+    return e.message;
+  }
+
   $('bv-comecar').onclick = async () => {
+    const criar = Conta.modo === 'criar';
     const nome = normalizarNome($('bv-nome').value);
+    const senha = $('bv-senha').value;
     const codigo = $('bv-codigo').value.trim();
-    $('bv-erro').textContent = '';
-    if (!nomeValido(nome)) { $('bv-erro').textContent = 'Informe nome e sobrenome.'; return; }
-    if (!codigo) { $('bv-erro').textContent = 'Informe o código do grupo.'; return; }
-    const perfil = { nome, codigo, aparelhoId: novoId(), criadoEm: Date.now(), registrado: false };
+    const erro = (m) => { $('bv-erro').textContent = m; };
+    erro('');
+    if (!nomeValido(nome)) return erro(criar ? 'Informe nome e sobrenome.' : 'Informe o nome e sobrenome da sua conta.');
+    if (senha.length < 4) return erro(criar ? 'A senha precisa ter pelo menos 4 caracteres.' : 'Digite sua senha.');
+    if (criar && senha !== $('bv-senha2').value) return erro('As duas senhas não estão iguais.');
+    if (!codigo) return erro('Informe o código do grupo.');
+    if (!Api.urlConfigurada()) return erro('O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).');
+    if (!navigator.onLine) return erro('Sem internet. Para criar a conta ou entrar, o celular precisa estar conectado.');
+
+    const anterior = await Perfil.obter();
+    const aparelhoId = (anterior && anterior.aparelhoId) || aparelhoNovo || (aparelhoNovo = novoId());
+    const temp = { aparelhoId, codigo };
     const botao = $('bv-comecar');
     botao.disabled = true;
-    botao.textContent = 'Conferindo…';
+    botao.textContent = criar ? 'Criando a conta…' : 'Entrando…';
     try {
-      if (navigator.onLine && Api.urlConfigurada()) {
-        const r = await Api.chamar('registrar', { aparelho: await Aparelho.info() }, { perfil, tempoMs: 25000 });
-        perfil.registrado = true;
-        perfil.nomeServidor = r.nome;
-        if (r.listas) await Banco.gravarConfig('listas', r.listas);
-      }
+      const r = await Api.chamar(criar ? 'criarConta' : 'entrar', { nome, senha, aparelho: await Aparelho.info() }, { perfil: temp, tempoMs: 30000 });
+      await concluirEntrada(r, anterior, temp);
     } catch (e) {
-      if (e instanceof Api.ErroServidor && e.codigo === 'codigo_invalido') {
-        $('bv-erro').textContent = 'Código do grupo inválido. Confira com o organizador.';
-        botao.disabled = false;
-        botao.textContent = 'Começar';
-        return;
-      }
-      toast(e instanceof Api.ErroRede
-        ? 'Sem conexão agora: o código será conferido na primeira sincronização.'
-        : 'Aviso: ' + e.message, 5000);
+      erro(mensagemErroConta(e));
+    } finally {
+      botao.disabled = false;
+      botao.textContent = criar ? 'Criar conta' : 'Entrar';
     }
-    await Perfil.salvar(perfil);
-    await Banco.gravarConfig('desde', 0);
-    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* opcional */ }
-    botao.disabled = false;
-    botao.textContent = 'Começar';
-    exibirInicio();
-    agendarSync(1000);
   };
+
+  async function limparDadosLocais() {
+    await Banco.limpar('lancamentos');
+    await Banco.limpar('arquivos');
+    for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite']) await Banco.apagar('config', k);
+  }
+
+  async function concluirEntrada(r, anterior, temp) {
+    const contaAnterior = anterior && anterior.contaId;
+    if (contaAnterior && contaAnterior !== r.conta.id) {
+      // outra pessoa entrando neste celular: os dados da conta anterior saem daqui (continuam no servidor)
+      const n = await Sync.pendentes();
+      if (n > 0) {
+        const ok = await confirmar(
+          `Este celular tem ${plural(n, '1 lançamento', '# lançamentos')} de ${anterior.nome || 'outra conta'} ainda não ${plural(n, 'enviado', 'enviados')}. ` +
+          `Entrando com outra conta, ${plural(n, 'ele será apagado', 'eles serão apagados')} deste celular.`, 'Apagar e entrar', 'Cancelar');
+        if (!ok) {
+          try { await Api.chamar('sair', {}, { perfil: Object.assign({}, temp, { token: r.token }), tempoMs: 8000 }); } catch (e) { /* sem problema */ }
+          return;
+        }
+      }
+      await limparDadosLocais();
+    }
+    await Perfil.salvar({
+      aparelhoId: temp.aparelhoId, codigo: temp.codigo, token: r.token, contaId: r.conta.id, nome: r.conta.nome,
+      criadoEm: (anterior && anterior.criadoEm) || Date.now(), entrouEm: Date.now()
+    });
+    if (r.listas && r.listas.categorias && r.listas.categorias.length) await Banco.gravarConfig('listas', r.listas);
+    await Banco.gravarConfig('desde', 0);
+    await Banco.apagar('config', 'ultimoErro');
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* opcional */ }
+    exibirInicio();
+    toast(`Olá, ${r.conta.nome.split(' ')[0]}!`);
+    // traz o histórico da conta (no Wi-Fi também envia o que estiver pendente neste celular)
+    Sync.sincronizar(Sync.conexao() === 'wifi' ? {} : { somenteBaixar: true });
+  }
 
   // ------------------------------------------------------------------
   //  Tela inicial
@@ -261,8 +401,8 @@
 
   async function renderInicio() {
     const perfil = await Perfil.obter();
-    if (!perfil) return;
-    $('ini-nome').textContent = 'Olá, ' + (perfil.nomeServidor || perfil.nome);
+    if (!perfil || !perfil.token) { iniciarBoasVindas(motivoEntrada(perfil)); return; }
+    $('ini-nome').textContent = 'Olá, ' + perfil.nome;
     const lancs = (await Banco.todos('lancamentos'))
       .filter(l => !l.excluirPendente)
       .sort((a, b) => (b.dataHora || 0) - (a.dataHora || 0));
@@ -290,7 +430,7 @@
       $('lista').innerHTML = html;
     }
     await renderAlertas(lancs, perfil);
-    await atualizarBarraSync();
+    await atualizarIconeSync();
   }
 
   async function renderAlertas(lancs, perfil) {
@@ -313,41 +453,63 @@
     if (aguardando && limite && Date.now() - limite < 6 * 3600 * 1000) {
       html.push(alerta('laranja', 'O limite gratuito da IA foi atingido. Os áudios serão interpretados automaticamente mais tarde.'));
     }
-    if (promptInstalacao && !estaInstalado()) html.push(alerta('azul', 'Instale o app na tela inicial do celular.', 'Instalar', 'instalar'));
+    if (mostrarAvisoChrome()) {
+      // no Chrome a pessoa entra com o mesmo nome e senha; antes disso, o que está pendente precisa ser enviado
+      const n = await Sync.pendentes();
+      html.push(`<div class="alerta-caixa laranja coluna"><span><b>Para instalar o app, use o Google Chrome.</b> Por este navegador o Android bloqueia a instalação (“app de risco”, Play Protect). ` +
+        `No Chrome, entre com o mesmo nome e senha.${n ? ' Antes, toque nas setas lá em cima para enviar seus lançamentos.' : ''}</span>` +
+        `<a class="botao pequeno" href="${esc(linkAbrirNoChrome(perfil.codigo))}">Abrir no Chrome</a></div>`);
+    } else if (promptInstalacao && !estaInstalado()) {
+      html.push(alerta('azul', 'Instale o app na tela inicial do celular.', 'Instalar', 'instalar'));
+    }
     $('alertas').innerHTML = html.join('');
   }
 
-  async function atualizarBarraSync(detalheExtra) {
-    if (telaAtual !== 'inicio') return;
-    const n = await Sync.pendentes();
-    const tipo = Sync.conexao();
-    const ultima = await Banco.lerConfig('ultimaSync', null);
-    const erro = await Banco.lerConfig('ultimoErro', null);
-    let status;
-    let detalhe = '';
-    let classe = '';
+  // ---- ícone de sincronização no topo: vermelho = falta enviar, amarelo = enviando, verde = tudo certo
+  let rotuloRelogio = null;
+  function rotulo(texto, cor, ms) {
+    const el = $('sync-rotulo');
+    clearTimeout(rotuloRelogio);
+    if (!texto) { el.classList.add('oculto'); return; }
+    el.textContent = texto;
+    el.className = 'sync-rotulo ' + (cor || '');
+    if (ms) rotuloRelogio = setTimeout(() => el.classList.add('oculto'), ms);
+  }
+
+  async function atualizarIconeSync() {
+    const btn = $('btn-sync');
+    let estado = 'ok';
+    let titulo = 'Tudo sincronizado';
+    let n = 0;
     if (Sync.estaRodando()) {
-      status = 'Sincronizando…';
-      detalhe = (detalheExtra && detalheExtra.detalhe) || '';
-    } else if (n === 0) {
-      status = 'Tudo enviado ✓';
-      classe = 'ok';
-      detalhe = ultima ? 'Última sincronização: ' + quando(ultima) : '';
+      estado = 'sincronizando';
+      titulo = 'Sincronizando…';
     } else {
-      status = n === 1 ? '1 lançamento aguardando envio' : `${n} lançamentos aguardando envio`;
-      classe = 'alerta';
-      detalhe = tipo === 'wifi' ? 'Wi-Fi: o envio é automático'
-        : tipo === 'offline' ? 'Sem internet: envia quando conectar'
-          : `Você está em ${NOMES_CONEXAO[tipo]}: toque em Sincronizar para enviar`;
+      n = await Sync.pendentes();
+      const ultima = await Banco.lerConfig('ultimaSync', 0);
+      const erro = await Banco.lerConfig('ultimoErro', null);
+      const falhou = !!(erro && erro.quando && erro.quando >= (ultima || 0));
+      if (Sync.estaRodando()) {
+        estado = 'sincronizando';
+        titulo = 'Sincronizando…';
+      } else if (n > 0) {
+        estado = 'pendente';
+        titulo = plural(n, '1 lançamento aguardando envio', '# lançamentos aguardando envio') + '. Toque para sincronizar.';
+      } else if (falhou || !ultima) {
+        estado = 'pendente';
+        titulo = falhou ? 'A última sincronização não deu certo. Toque para tentar de novo.' : 'Toque para sincronizar.';
+      }
     }
-    if (!Sync.estaRodando() && erro && erro.mensagem && Date.now() - erro.quando < 3600 * 1000) {
-      detalhe = 'Último erro: ' + erro.mensagem;
-      classe = 'alerta';
-    }
-    $('sync-status').textContent = status;
-    $('sync-detalhe').textContent = detalhe;
-    $('barra-sync').className = 'barra-sync ' + classe;
-    $('btn-sync').disabled = Sync.estaRodando() || tipo === 'offline';
+    btn.classList.remove('ok', 'pendente', 'sincronizando');
+    btn.classList.add(estado);
+    btn.title = titulo;
+    btn.setAttribute('aria-label', titulo);
+    const cont = $('sync-contador');
+    cont.textContent = n > 9 ? '9+' : String(n);
+    cont.classList.toggle('oculto', !(estado === 'pendente' && n > 0));
+    // "Sincronizado" não pode continuar aparecendo se já há algo novo para enviar
+    const r = $('sync-rotulo');
+    if (estado !== 'ok' && r.classList.contains('verde') && !r.classList.contains('oculto')) rotulo('');
   }
 
   $('lista').addEventListener('click', (e) => {
@@ -376,10 +538,9 @@
     }
   });
 
-  $('btn-sync').onclick = async () => {
-    const r = await Sync.sincronizar({ manual: true });
-    if (r && r.ignorado === 'offline') toast('Sem internet no momento.');
-    else if (r && !r.erro && !r.ignorado && !r.interpretados && !r.limite && !r.iaIndisponivel && !r.erros.length) toast('Sincronização concluída.');
+  $('btn-sync').onclick = () => {
+    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo'); return; }
+    Sync.sincronizar({ manual: true });
   };
   $('btn-voz').onclick = () => abrirVoz();
   $('btn-texto').onclick = () => abrirNovoTexto();
@@ -470,7 +631,7 @@
     let msg = '';
     if (l.status === 'aguardando_ia') {
       classe = 'laranja';
-      msg = '<b>Aguardando a IA.</b> O áudio é interpretado quando for enviado (no Wi-Fi ou pelo botão Sincronizar). Se preferir, preencha você mesmo: com valor e categoria preenchidos, o lançamento fica confirmado.';
+      msg = '<b>Aguardando a IA.</b> O áudio é interpretado quando for enviado (no Wi-Fi ou pelas setas lá em cima). Se preferir, preencha você mesmo: com valor e categoria preenchidos, o lançamento fica confirmado.';
     } else if (l.status === 'revisar') {
       msg = '<b>A IA preencheu os campos abaixo.</b> Confira, corrija se precisar e toque em Confirmar.';
     } else if (l.status === 'erro_ia') {
@@ -507,8 +668,9 @@
   }
   $('f-add-item').onclick = () => { addItem(); Form.alterado = true; };
   $('f-valor').addEventListener('input', atualizarSoma);
-  $('tela-form').addEventListener('input', () => { Form.alterado = true; });
-  $('tela-form').addEventListener('change', () => { Form.alterado = true; });
+  // (escolher foto não conta como alteração sozinho: só se a pessoa usar a foto no recorte)
+  $('tela-form').addEventListener('input', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
+  $('tela-form').addEventListener('change', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
 
   function miniatura(blob, chave) {
     const conteudo = blob ? `<img src="${urlDe(blob)}" alt="foto">` : '<div class="sem-arquivo">Foto guardada no Drive</div>';
@@ -530,18 +692,18 @@
     renderFotosForm();
   });
 
+  /** Abre a tela de recorte para cada foto escolhida; guarda as que a pessoa usar. */
   async function adicionarFotos(input, destino) {
     const arquivos = Array.from(input.files || []);
     input.value = '';
-    if (!arquivos.length) return 0;
-    toast(arquivos.length > 1 ? 'Preparando as fotos…' : 'Preparando a foto…', 1500);
     let n = 0;
-    for (const f of arquivos) {
+    for (let i = 0; i < arquivos.length; i++) {
       try {
-        destino.push({ id: novoId(), blob: await Fotos.reduzir(f) });
-        n++;
+        const blob = await Recorte.abrir(arquivos[i], { titulo: arquivos.length > 1 ? `Foto ${i + 1} de ${arquivos.length}` : '' });
+        if (blob === undefined) break; // "voltar" do Android: desiste das fotos restantes
+        if (blob) { destino.push({ id: novoId(), blob }); n++; }
       } catch (e) {
-        toast('Não foi possível usar uma das fotos: ' + e.message);
+        toast('Não foi possível usar uma das fotos: ' + e.message, 4500);
       }
     }
     return n;
@@ -590,7 +752,7 @@
       // pega o estado mais recente salvo no aparelho (a sincronização pode ter atualizado algo)
       const salvo = await Banco.obter('lancamentos', l.id);
       if (salvo) {
-        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA'].forEach(k => {
+        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio'].forEach(k => {
           if (salvo[k] !== undefined) l[k] = salvo[k];
         });
       }
@@ -613,7 +775,7 @@
     } finally {
       botao.disabled = false;
     }
-    toast(Form.modo === 'revisar' ? 'Lançamento confirmado.' : 'Lançamento salvo.');
+    toastSalvo(Form.modo === 'revisar' ? 'Lançamento confirmado' : 'Lançamento salvo');
     concluirEVoltar();
     agendarSync(800);
   }
@@ -622,6 +784,7 @@
   $('form-excluir').onclick = async () => {
     if (!await confirmar('Excluir este lançamento?', 'Excluir', 'Cancelar')) return;
     const l = await Banco.obter('lancamentos', Form.l.id);
+    let precisaEnviar = false;
     if (l) {
       if (!l.tentouEnviar && !l.versaoBase) {
         await Sync.apagarLocal(l.id); // nunca foi enviado: basta apagar daqui
@@ -629,9 +792,11 @@
         l.excluirPendente = true;
         l.alteradoEm = Date.now();
         await Banco.gravar('lancamentos', l);
+        precisaEnviar = true;
       }
     }
-    toast('Lançamento excluído.');
+    if (precisaEnviar) toastSalvo('Lançamento excluído');
+    else toast('Lançamento excluído.');
     concluirEVoltar();
     agendarSync(800);
   };
@@ -750,7 +915,7 @@
     }
     toast(Sync.conexao() === 'wifi'
       ? 'Áudio salvo. Enviando para a IA…'
-      : 'Áudio salvo. Ele será interpretado quando você sincronizar ou estiver no Wi-Fi.', 4500);
+      : 'Áudio salvo no celular. Para enviar à IA, toque nas setas vermelhas lá em cima (no Wi-Fi é automático).', 5000);
     concluirEVoltar();
     agendarSync(500);
   };
@@ -761,16 +926,16 @@
   // ------------------------------------------------------------------
   async function abrirConfig() {
     const p = await Perfil.obter();
-    $('cfg-nome').value = p.nome;
+    if (!p || !p.token) { iniciarBoasVindas(motivoEntrada(p)); return; }
+    $('cfg-conta').innerHTML = `<b>${esc(p.nome)}</b><small>Conta conectada neste celular</small>`;
     $('cfg-codigo').value = p.codigo;
-    $('cfg-nome-servidor').textContent = p.nomeServidor && p.nomeServidor !== p.nome
-      ? `O organizador ajustou seu nome para: ${p.nomeServidor}` : '';
     mostrarTela('config');
     await renderInfo();
   }
 
   async function renderInfo() {
     const p = await Perfil.obter();
+    if (!p) return;
     const ultima = await Banco.lerConfig('ultimaSync', null);
     const erro = await Banco.lerConfig('ultimoErro', null);
     let armazenamento = '—';
@@ -781,7 +946,7 @@
     } catch (x) { /* opcional */ }
     const itens = [
       ['Aparelho', p.aparelhoId.slice(0, 8)],
-      ['Versão do app', CONFIG.VERSAO_APP],
+      ['Versão do app', VERSAO_DO_APP],
       ['Conexão', NOMES_CONEXAO[Sync.conexao()]],
       ['Aguardando envio', String(await Sync.pendentes())],
       ['Última sincronização', ultima ? quando(ultima) : 'nunca'],
@@ -792,46 +957,25 @@
   }
 
   $('cfg-salvar').onclick = async () => {
-    const nome = normalizarNome($('cfg-nome').value);
     const codigo = $('cfg-codigo').value.trim();
-    if (!nomeValido(nome)) { toast('Informe nome e sobrenome.'); return; }
     if (!codigo) { toast('Informe o código do grupo.'); return; }
     const p = await Perfil.obter();
-    if (nome === p.nome && codigo === p.codigo) { toast('Nada mudou.'); return; }
-    p.nome = nome;
+    if (codigo === p.codigo && !p.codigoInvalido) { toast('Nada mudou.'); return; }
     p.codigo = codigo;
-    p.precisaRegistrar = true;
     p.codigoInvalido = false;
     await Perfil.salvar(p);
-    $('cfg-nome').value = nome;
-    if (navigator.onLine && Api.urlConfigurada()) {
-      try {
-        const r = await Api.chamar('registrar', { aparelho: await Aparelho.info() });
-        p.registrado = true;
-        p.precisaRegistrar = false;
-        p.nomeServidor = r.nome;
-        await Perfil.salvar(p);
-        toast('Salvo e conferido com o servidor.');
-      } catch (e) {
-        if (e instanceof Api.ErroServidor && e.codigo === 'codigo_invalido') {
-          p.codigoInvalido = true;
-          await Perfil.salvar(p);
-          toast('Código do grupo inválido. Confira com o organizador.', 4500);
-        } else {
-          toast('Salvo. Será conferido na próxima sincronização.');
-        }
-      }
-    } else {
-      toast('Salvo. Será conferido na próxima sincronização.');
-    }
+    if (Sync.conexao() === 'offline') { toast('Código salvo. Ele será conferido quando houver internet.'); return; }
+    toast('Conferindo o código…', 2000);
+    const r = await Sync.sincronizar({ somenteBaixar: true });
+    const atual = await Perfil.obter();
+    if (atual && atual.codigoInvalido) toast('Código do grupo inválido. Confira com o organizador.', 4500);
+    else if (r && !r.erro && !r.ignorado) toast('Código salvo e conferido.');
+    else if (r && r.ignorado) toast('Código salvo.');
     renderInfo();
-    agendarSync(500);
   };
   $('cfg-sync').onclick = async () => {
-    const r = await Sync.sincronizar({ manual: true });
-    if (r && r.ignorado === 'offline') toast('Sem internet no momento.');
-    else if (r && !r.erro && !r.ignorado) toast('Sincronização concluída.');
-    renderInfo();
+    await Sync.sincronizar({ manual: true });
+    if (telaAtual === 'config') renderInfo();
   };
   $('cfg-atualizar').onclick = async () => {
     if (!('serviceWorker' in navigator)) return;
@@ -841,45 +985,93 @@
     try { await reg.update(); } catch (e) { toast('Sem conexão para verificar.'); return; }
     setTimeout(() => toast(swEsperando || reg.waiting || reg.installing ? 'Nova versão encontrada: veja o aviso na tela inicial.' : 'O app já está na versão mais recente.'), 2500);
   };
+  $('cfg-sair').onclick = async () => {
+    const n = await Sync.pendentes();
+    const msg = n > 0
+      ? `${plural(n, 'Há 1 lançamento que ainda não foi enviado', 'Há # lançamentos que ainda não foram enviados')}. Se sair agora, ${plural(n, 'ele será perdido', 'eles serão perdidos')}. ` +
+        'Para enviar antes, toque em "Sincronizar agora".'
+      : 'Sair da sua conta neste celular? Seus lançamentos continuam guardados e aparecem de novo quando você entrar.';
+    if (!await confirmar(msg, n > 0 ? 'Sair mesmo assim' : 'Sair', 'Cancelar')) return;
+    if (Sync.estaRodando()) {
+      toast('Aguarde: terminando a sincronização…', 60000);
+      const limite = Date.now() + 120000;
+      while (Sync.estaRodando() && Date.now() < limite) await new Promise(ok => setTimeout(ok, 300));
+    }
+    const p = await Perfil.obter();
+    try { await Api.chamar('sair', {}, { tempoMs: 8000 }); } catch (e) { /* sem internet: a sessão só deixa de ser usada */ }
+    await limparDadosLocais();
+    await Perfil.salvar({ aparelhoId: p.aparelhoId, codigo: p.codigo, criadoEm: p.criadoEm, saiuEm: Date.now() });
+    rotulo('');
+    toast('Você saiu da conta neste celular.');
+    iniciarBoasVindas('saiu');
+  };
   $('cfg-voltar').onclick = () => voltar();
 
   // ------------------------------------------------------------------
-  //  Sincronização automática (só no Wi-Fi)
+  //  Sincronização automática (só no Wi-Fi) e o ícone do topo
   // ------------------------------------------------------------------
   function agendarSync(atraso = 1500) {
     clearTimeout(agendado);
     agendado = setTimeout(() => { if (Sync.conexao() === 'wifi') Sync.sincronizar(); }, atraso);
   }
 
+  let ultimoAvisoErro = { msg: '', quando: 0 };
   window.addEventListener('sync-estado', async (ev) => {
     const d = ev.detail;
+    if (d.estado === 'sincronizando') {
+      if (d.visivel) rotulo('Sincronizando…', 'amarelo');
+      atualizarIconeSync();
+      return;
+    }
     if (d.estado === 'concluido') {
       const r = d.resumo;
+      const faltam = await Sync.pendentes();
+      if (d.visivel || !$('sync-rotulo').classList.contains('oculto')) {
+        if (faltam === 0 && !r.erros.length) rotulo('Sincronizado', 'verde', 2500);
+        else rotulo('');
+      }
       if (r.interpretados) toast(r.interpretados === 1 ? 'Um áudio foi interpretado. Toque em Revisar.' : `${r.interpretados} áudios interpretados. Toque em Revisar.`, 4500);
       else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios serão interpretados mais tarde.', 4500);
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
       else if (r.erros.length) toast('Alguns itens não foram enviados; vou tentar de novo.', 4000);
+      else if (d.manual && telaAtual === 'config') toast('Sincronização concluída.');
       if (telaAtual === 'inicio') renderInicio();
+      else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
-    } else if (d.estado === 'erro') {
-      toast(d.mensagem, 5000);
-      if (telaAtual === 'inicio') renderInicio();
-    } else if (telaAtual === 'inicio') {
-      atualizarBarraSync(d);
+      return;
     }
+    if (d.estado === 'falhou' || d.estado === 'erro') {
+      rotulo('');
+      if (d.codigo === 'sessao_invalida') {
+        if (telaAtual === 'inicio' || telaAtual === 'config') iniciarBoasVindas('sessao');
+        return; // nas outras telas, a pessoa termina o que está fazendo; o pedido para entrar aparece ao voltar
+      }
+      const repetido = d.mensagem === ultimoAvisoErro.msg && Date.now() - ultimoAvisoErro.quando < 10 * 60 * 1000;
+      if (d.manual || (d.estado === 'erro' && !repetido)) {
+        toast(d.mensagem, 5000);
+        ultimoAvisoErro = { msg: d.mensagem, quando: Date.now() };
+      }
+      if (telaAtual === 'inicio') renderInicio();
+      else atualizarIconeSync();
+      if (telaAtual === 'config') renderInfo();
+      return;
+    }
+    if (d.estado === 'offline' && d.manual) toast('Sem internet no momento.');
+    atualizarIconeSync();
   });
 
-  window.addEventListener('online', () => { atualizarBarraSync(); agendarSync(); });
-  window.addEventListener('offline', () => atualizarBarraSync());
+  window.addEventListener('online', () => { atualizarIconeSync(); agendarSync(); });
+  window.addEventListener('offline', () => atualizarIconeSync());
   if (navigator.connection && navigator.connection.addEventListener) {
-    navigator.connection.addEventListener('change', () => { atualizarBarraSync(); agendarSync(); });
+    navigator.connection.addEventListener('change', () => { atualizarIconeSync(); agendarSync(); });
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { atualizarBarraSync(); agendarSync(500); }
+    if (document.visibilityState === 'visible') { atualizarIconeSync(); agendarSync(500); }
   });
   setInterval(async () => {
     if (document.visibilityState !== 'visible' || Sync.conexao() !== 'wifi' || Sync.estaRodando()) return;
-    if (!await Perfil.obter()) return;
+    const p = await Perfil.obter();
+    if (!p || !p.token) return;
     const n = await Sync.pendentes();
     const ultima = await Banco.lerConfig('ultimaSync', 0);
     if (n > 0 || Date.now() - (ultima || 0) > 5 * 60 * 1000) Sync.sincronizar();
@@ -944,7 +1136,7 @@
     }
     try { await limparArquivosAntigos(); } catch (e) { /* não impede o uso */ }
     const perfil = await Perfil.obter();
-    if (!perfil) { iniciarBoasVindas(); return; }
+    if (!perfil || !perfil.token) { iniciarBoasVindas(motivoEntrada(perfil)); return; }
     exibirInicio();
     agendarSync(800);
   }
