@@ -14,6 +14,34 @@
   let pedimosAtualizacao = false;
   let agendado = null;
   let aparelhoNovo = null; // identificador criado no primeiro acesso, antes de existir perfil
+  let prefCameraSistema = false; // configurações: usar a câmera do próprio celular em vez da câmera do app
+  let removido = false; // "Remover app" foi usado: não grava nem sincroniza mais nada
+  let pedidosSenha = []; // organizador: pedidos de senha nova em aberto
+  let ultimaBuscaPedidos = 0;
+
+  // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
+  // e abre sozinho uma vez depois de cada atualização.
+  const NOVIDADES = [
+    { titulo: 'Versão 2', itens: [
+      '📷 <b>Lançar por foto:</b> tire a foto da nota fiscal e o app preenche os itens (com quantidade e preço de cada um), o total, o local, a data e a hora. Se a nota tiver QR Code, os dados vêm direto do site da SEFAZ.',
+      '📸 <b>Câmera dentro do app</b>, com lanterna: depois da foto você vai direto para o recorte, que agora tem o botão <b>Repetir foto</b>.',
+      '🧮 <b>Itens com quantidade e preço de cada um</b> (ex.: 2 × R$ 5,00 = R$ 10,00), também por voz e por texto.',
+      '🔑 <b>Esqueci minha senha:</b> o organizador manda um código pelo seu WhatsApp para você criar uma senha nova.',
+      '⚙️ Nas configurações: <b>Trocar senha</b>, <b>Alterar WhatsApp</b>, código do grupo escondido (toque no olho para ver) e o botão <b>Remover app</b>.',
+      '🏷️ A versão do app aparece ao lado do nome, na tela inicial.'
+    ] },
+    { titulo: 'Versão 1.1', itens: [
+      'Conta com nome e senha: entre em qualquer celular e veja os seus lançamentos.',
+      'Recorte e giro das fotos antes de salvar.',
+      'Ícone de sincronização no alto da tela (vermelho: falta enviar; amarelo: enviando; verde: tudo enviado).',
+      'Exemplo de como falar no lançamento por voz.',
+      'Aviso para instalar pelo Google Chrome (sem o bloqueio do Play Protect).'
+    ] },
+    { titulo: 'Versão 1.0', itens: [
+      'Lançamento por voz (a IA preenche) e por texto, com fotos e localização.',
+      'Funciona sem internet: os lançamentos ficam no celular e são enviados depois.'
+    ] }
+  ];
 
   // ------------------------------------------------------------------
   //  Utilidades
@@ -37,6 +65,58 @@
     if (v == null || isNaN(v)) return '';
     return Number(v).toFixed(2).replace('.', ',');
   }
+  function lerQtd(t) {
+    const s = String(t == null ? '' : t).trim().replace(',', '.');
+    if (!s) return null;
+    const n = Number(s);
+    return isFinite(n) && n > 0 ? Math.round(n * 1000) / 1000 : null;
+  }
+  function lerUnit(t) {
+    if (t == null) return null;
+    let s = String(t).trim().replace(/[R$\s]/g, '');
+    if (!s) return null;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    const n = Number(s);
+    return isFinite(n) ? Math.round(n * 1000) / 1000 : null;
+  }
+  function qtdParaCampo(q) { return q == null ? '' : String(q).replace('.', ','); }
+  function unitParaCampo(v) {
+    if (v == null || isNaN(v)) return '';
+    const tres = Math.abs(Math.round(v * 100) - v * 100) > 1e-6; // ex.: litro a R$ 6,199
+    return Number(v).toFixed(tres ? 3 : 2).replace('.', ',');
+  }
+  // WhatsApp: guardado só com os números; na tela, "(83) 99999-8888"
+  function digitosZap(v) {
+    let d = String(v || '').replace(/\D/g, '');
+    if ((d.length === 12 || d.length === 13) && d.startsWith('55')) d = d.slice(2);
+    return d.replace(/^0+/, '');
+  }
+  function zapValido(v) {
+    const d = digitosZap(v);
+    return (d.length === 10 || d.length === 11) && Number(d.slice(0, 2)) >= 11;
+  }
+  function formatarZap(v) {
+    const d = digitosZap(v).slice(0, 11);
+    if (!d) return '';
+    if (d.length <= 2) return '(' + d;
+    if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+    if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  }
+  function mascaraZap(input) {
+    input.addEventListener('input', () => {
+      const noFim = input.selectionStart === input.value.length;
+      const novo = formatarZap(input.value);
+      if (novo !== input.value) {
+        input.value = novo;
+        if (noFim) input.setSelectionRange(novo.length, novo.length);
+      }
+    });
+  }
+  function linkZap(numero, texto) {
+    return 'https://wa.me/' + String(numero || '').replace(/\D/g, '') + (texto ? '?text=' + encodeURIComponent(texto) : '');
+  }
+  function primeiroNome(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
   function paraInputLocal(ms) {
     const d = new Date(ms || Date.now());
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -108,6 +188,52 @@
     if (Sync.conexao() === 'wifi') toast(msg + '.');
     else toast(msg + ' no celular. Para enviar, toque nas setas vermelhas lá em cima.', 5000);
   }
+  /** Diálogo com várias opções (cada uma vira um botão). Devolve o "valor" da escolhida. */
+  function escolher(msg, opcoes) {
+    return new Promise((ok) => {
+      const raiz = $('dialogo');
+      raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p><div class="botoes coluna">` +
+        opcoes.map((o, i) => `<button class="botao ${o.classe || ''}" data-opcao="${i}">${esc(o.texto)}</button>`).join('') + '</div></div></div>';
+      raiz.querySelectorAll('[data-opcao]').forEach((b) => {
+        b.onclick = () => { raiz.innerHTML = ''; ok(opcoes[Number(b.dataset.opcao)].valor); };
+      });
+    });
+  }
+  /**
+   * Diálogo com campos. aoConfirmar(valores) devolve '' (deu certo) ou a mensagem de erro (o diálogo continua aberto).
+   */
+  function dialogoCampos({ titulo, texto = '', campos, sim = 'Salvar', mostrarSenha = false, aoConfirmar }) {
+    return new Promise((ok) => {
+      const raiz = $('dialogo');
+      raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo" role="dialog"><h2>${esc(titulo)}</h2>${texto ? `<p class="dica">${esc(texto)}</p>` : ''}` +
+        campos.map(c => `<label for="${c.id}">${esc(c.rotulo)}</label><input id="${c.id}" type="${c.tipo || 'text'}"` +
+          `${c.inputmode ? ` inputmode="${c.inputmode}"` : ''} autocomplete="${c.autocomplete || 'off'}" placeholder="${esc(c.placeholder || '')}" value="${esc(c.valor || '')}">`).join('') +
+        (mostrarSenha ? '<label class="marcar"><input type="checkbox" id="dlg-mostrar"> Mostrar senha</label>' : '') +
+        `<p class="erro" id="dlg-erro"></p><div class="botoes"><button class="botao" id="dlg-nao">Cancelar</button>` +
+        `<button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`;
+      campos.forEach((c) => {
+        if (c.mascaraZap) mascaraZap($(c.id));
+        $(c.id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('dlg-sim').click(); } });
+      });
+      if (mostrarSenha) {
+        $('dlg-mostrar').onchange = () => campos.forEach((c) => { if (c.tipo === 'password' || c.senha) { c.senha = true; $(c.id).type = $('dlg-mostrar').checked ? 'text' : 'password'; } });
+      }
+      $('dlg-nao').onclick = () => { raiz.innerHTML = ''; ok(false); };
+      $('dlg-sim').onclick = async () => {
+        const valores = {};
+        campos.forEach((c) => { valores[c.id] = $(c.id).value; });
+        $('dlg-sim').disabled = true;
+        let erro = '';
+        try { erro = await aoConfirmar(valores); } catch (e) { erro = e.message; }
+        if (!$('dlg-sim')) return;
+        $('dlg-sim').disabled = false;
+        if (erro) { $('dlg-erro').textContent = erro; return; }
+        raiz.innerHTML = '';
+        ok(true);
+      };
+      setTimeout(() => { const f = $(campos[0].id); if (f) f.focus(); }, 50);
+    });
+  }
   function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
     return new Promise((ok) => {
       const raiz = $('dialogo');
@@ -141,13 +267,18 @@
       );
     });
   }
-  function renderGps(el, pos, tentarDeNovo) {
-    if (pos) {
-      el.textContent = `📍 Localização obtida (±${pos.precisao} m)`;
-    } else {
-      el.innerHTML = '📍 Sem localização — o lançamento será salvo assim mesmo. <button class="botao pequeno" type="button">Tentar de novo</button>';
-      el.querySelector('button').onclick = tentarDeNovo;
-    }
+  function mensagemErroGeral(e) {
+    if (e instanceof Api.ErroRede) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
+    if (e && e.codigo === 'acao_desconhecida') return 'O servidor ainda está na versão antiga. Avise o organizador para atualizar o código no Apps Script.';
+    return (e && e.message) || 'Algo deu errado. Tente de novo.';
+  }
+  function abrirNovidades() {
+    const raiz = $('dialogo');
+    const blocos = NOVIDADES.map((v, i) => `<div class="${i === 0 ? 'atual' : ''}"><h4>${esc(v.titulo)}${i === 0 ? ' <small>(esta versão)</small>' : ''}</h4>` +
+      `<ul>${v.itens.map(t => `<li>${t}</li>`).join('')}</ul></div>`).join('');
+    raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo novidades" role="dialog" aria-label="O que há de novo"><h2>✨ O que há de novo</h2>${blocos}` +
+      '<div class="botoes"><button class="botao primario" id="nov-ok">Entendi</button></div></div></div>';
+    $('nov-ok').onclick = () => { raiz.innerHTML = ''; };
   }
 
   // ------------------------------------------------------------------
@@ -195,16 +326,28 @@
       if (ok) { Gravador.cancelar(); clearInterval(Voz.relogio); Voz.audio = null; }
       return ok;
     }
+    if (telaAtual === 'foto' && Foto.fotos.length) {
+      const ok = await confirmar('Descartar as fotos desta nota?', 'Descartar', 'Continuar');
+      if (ok) Foto.fotos = [];
+      return ok;
+    }
     return true;
   }
   window.addEventListener('popstate', async () => {
+    if (Camera.aberta()) {
+      // "voltar" com a câmera aberta: só fecha a câmera
+      Camera.cancelar();
+      history.pushState({ tela: telaAtual }, '');
+      return;
+    }
     if (Recorte.aberto()) {
       // "voltar" com a tela de recorte aberta: só fecha o recorte
       Recorte.cancelar();
       history.pushState({ tela: telaAtual }, '');
       return;
     }
-    if (telaAtual === 'inicio' || telaAtual === 'boas-vindas') return;
+    if (telaAtual === 'senha') { mostrarTela('boas-vindas', { empilhar: false }); return; }
+    if (['inicio', 'boas-vindas', 'whatsapp', 'removido'].includes(telaAtual)) return;
     if (await podeSairDaTela()) exibirInicio();
     else history.pushState({ tela: telaAtual }, '');
   });
@@ -215,12 +358,18 @@
   function concluirEVoltar() {
     Form.alterado = false;
     Voz.audio = null;
+    Foto.fotos = [];
     voltar();
   }
-  function exibirInicio() {
+  async function exibirInicio() {
     liberarUrls();
     Form.token = null;
     Voz.token = null;
+    Foto.token = null;
+    if (removido) return;
+    const p = await Perfil.obter();
+    // contas antigas: o WhatsApp passa a ser obrigatório (para o "Esqueci minha senha")
+    if (p && p.token && p.precisaWhatsapp && navigator.onLine && Api.urlConfigurada()) { abrirTelaWhatsapp(); return; }
     mostrarTela('inicio', { empilhar: false });
     renderInicio();
   }
@@ -252,12 +401,14 @@
     $('bv-aba-criar').setAttribute('aria-selected', String(criar));
     $('bv-aba-entrar').setAttribute('aria-selected', String(!criar));
     $('bv-bloco-confirma').classList.toggle('oculto', !criar);
+    $('bv-bloco-zap').classList.toggle('oculto', !criar);
+    $('bv-esqueci').classList.toggle('oculto', criar);
     $('bv-senha').setAttribute('autocomplete', criar ? 'new-password' : 'current-password');
     $('bv-senha').placeholder = criar ? 'Mínimo 4 dígitos ou letras' : 'Sua senha';
     $('bv-comecar').textContent = criar ? 'Criar conta' : 'Entrar';
     $('bv-dica').textContent = criar
       ? 'Guarde o nome e a senha: com eles você entra na sua conta em qualquer celular.'
-      : 'Esqueceu a senha? Peça ao organizador para definir uma nova.';
+      : 'Use o mesmo nome e senha de quando criou a conta.';
     $('bv-erro').textContent = '';
   }
   $('bv-aba-criar').onclick = () => modoConta('criar');
@@ -268,7 +419,8 @@
     $('bv-senha2').type = tipo;
   };
   $('bv-codigo').addEventListener('input', () => renderAvisoChromeBoasVindas());
-  ['bv-nome', 'bv-senha', 'bv-senha2', 'bv-codigo'].forEach(id => {
+  mascaraZap($('bv-zap'));
+  ['bv-nome', 'bv-senha', 'bv-senha2', 'bv-zap', 'bv-codigo'].forEach(id => {
     $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('bv-comecar').click(); } });
   });
 
@@ -287,6 +439,7 @@
     $('bv-nome').value = motivo === 'migracao' ? (p.nomeServidor || p.nome || '') : motivo === 'sessao' ? (p.nome || '') : '';
     $('bv-senha').value = '';
     $('bv-senha2').value = '';
+    $('bv-zap').value = '';
     $('bv-mostrar').checked = false;
     $('bv-senha').type = 'password';
     $('bv-senha2').type = 'password';
@@ -299,7 +452,7 @@
   function mensagemErroConta(e) {
     if (e instanceof Api.ErroRede) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
     if (e.codigo === 'codigo_invalido') return 'Código do grupo inválido. Confira com o organizador.';
-    if (e.codigo === 'senha_incorreta') return 'Senha incorreta. Se esqueceu, peça ao organizador para definir uma nova senha.';
+    if (e.codigo === 'senha_incorreta') return 'Senha incorreta. Se esqueceu, toque em “Esqueci minha senha”.';
     if (e.codigo === 'acao_desconhecida') return 'O servidor ainda está na versão antiga. Avise o organizador para atualizar o código no Apps Script.';
     return e.message;
   }
@@ -314,6 +467,7 @@
     if (!nomeValido(nome)) return erro(criar ? 'Informe nome e sobrenome.' : 'Informe o nome e sobrenome da sua conta.');
     if (senha.length < 4) return erro(criar ? 'A senha precisa ter pelo menos 4 caracteres.' : 'Digite sua senha.');
     if (criar && senha !== $('bv-senha2').value) return erro('As duas senhas não estão iguais.');
+    if (criar && !zapValido($('bv-zap').value)) return erro('Informe seu WhatsApp com DDD (ex.: (83) 99999-8888).');
     if (!codigo) return erro('Informe o código do grupo.');
     if (!Api.urlConfigurada()) return erro('O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).');
     if (!navigator.onLine) return erro('Sem internet. Para criar a conta ou entrar, o celular precisa estar conectado.');
@@ -325,7 +479,9 @@
     botao.disabled = true;
     botao.textContent = criar ? 'Criando a conta…' : 'Entrando…';
     try {
-      const r = await Api.chamar(criar ? 'criarConta' : 'entrar', { nome, senha, aparelho: await Aparelho.info() }, { perfil: temp, tempoMs: 30000 });
+      const dados = { nome, senha, aparelho: await Aparelho.info() };
+      if (criar) dados.whatsapp = digitosZap($('bv-zap').value);
+      const r = await Api.chamar(criar ? 'criarConta' : 'entrar', dados, { perfil: temp, tempoMs: 30000 });
       await concluirEntrada(r, anterior, temp);
     } catch (e) {
       erro(mensagemErroConta(e));
@@ -359,16 +515,185 @@
     }
     await Perfil.salvar({
       aparelhoId: temp.aparelhoId, codigo: temp.codigo, token: r.token, contaId: r.conta.id, nome: r.conta.nome,
-      criadoEm: (anterior && anterior.criadoEm) || Date.now(), entrouEm: Date.now()
+      criadoEm: (anterior && anterior.criadoEm) || Date.now(), entrouEm: Date.now(),
+      whatsapp: r.whatsapp || '', precisaWhatsapp: !!r.precisaWhatsapp, organizador: !!r.organizador,
+      servidorAntigo: r.precisaWhatsapp === undefined
     });
+    await Banco.gravarConfig('versaoVista', VERSAO_DO_APP); // quem acabou de entrar não precisa ver o "O que há de novo"
     if (r.listas && r.listas.categorias && r.listas.categorias.length) await Banco.gravarConfig('listas', r.listas);
     await Banco.gravarConfig('desde', 0);
     await Banco.apagar('config', 'ultimoErro');
     try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* opcional */ }
+    pedidosSenha = [];
     exibirInicio();
     toast(`Olá, ${r.conta.nome.split(' ')[0]}!`);
     // traz o histórico da conta (no Wi-Fi também envia o que estiver pendente neste celular)
     Sync.sincronizar(Sync.conexao() === 'wifi' ? {} : { somenteBaixar: true });
+    if (r.organizador) buscarPedidos(true);
+  }
+
+  // ------------------------------------------------------------------
+  //  Esqueci minha senha: o organizador manda um código pelo WhatsApp
+  // ------------------------------------------------------------------
+  const Esqueci = { nome: '', grupo: '' };
+
+  function erroEsqueci(m) { $('es-erro').textContent = m || ''; }
+  function renderContatoOrganizador(org, nome) {
+    const el = $('es-org');
+    if (org && org.whatsapp) {
+      const msg = `Oi! Aqui é ${nome || 'do grupo'}. Pedi um código para trocar a minha senha do Controle de Gastos.`;
+      el.innerHTML = `<a class="botao zap grande" target="_blank" rel="noopener" href="${esc(linkZap(org.whatsapp, msg))}">💬 Falar com o organizador no WhatsApp</a>` +
+        `<small class="dica">Se o código demorar, mande uma mensagem: o organizador (${esc(org.nome)}) pode não estar com o app aberto.</small>`;
+    } else {
+      el.innerHTML = '<small class="dica">Se o código demorar, avise o organizador do grupo.</small>';
+    }
+  }
+  function abrirEsqueci() {
+    $('es-nome').value = normalizarNome($('bv-nome').value);
+    $('es-grupo').value = $('bv-codigo').value.trim();
+    $('es-passo1').classList.remove('oculto');
+    $('es-passo2').classList.add('oculto');
+    ['es-cod', 'es-senha', 'es-senha2'].forEach((id) => { $(id).value = ''; });
+    $('es-mostrar').checked = false;
+    $('es-senha').type = $('es-senha2').type = 'password';
+    $('es-org').innerHTML = '';
+    erroEsqueci('');
+    mostrarTela('senha');
+  }
+  $('bv-esqueci').onclick = () => abrirEsqueci();
+  $('es-voltar').onclick = () => voltar();
+  $('es-mostrar').onchange = () => { $('es-senha').type = $('es-senha2').type = $('es-mostrar').checked ? 'text' : 'password'; };
+  ['es-nome', 'es-grupo'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('es-pedir').click(); } }));
+  ['es-cod', 'es-senha', 'es-senha2'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('es-trocar').click(); } }));
+
+  async function aparelhoParaConta() {
+    const anterior = await Perfil.obter();
+    return { anterior, aparelhoId: (anterior && anterior.aparelhoId) || aparelhoNovo || (aparelhoNovo = novoId()) };
+  }
+
+  async function pedirCodigo() {
+    const nome = normalizarNome($('es-nome').value);
+    const grupo = $('es-grupo').value.trim();
+    erroEsqueci('');
+    if (!nomeValido(nome)) return erroEsqueci('Informe o nome e sobrenome da sua conta.');
+    if (!grupo) return erroEsqueci('Informe o código do grupo.');
+    if (!Api.urlConfigurada()) return erroEsqueci('O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).');
+    if (!navigator.onLine) return erroEsqueci('Sem internet. Conecte o celular para pedir o código.');
+    const { aparelhoId } = await aparelhoParaConta();
+    const botao = $('es-pedir');
+    botao.disabled = true;
+    botao.textContent = 'Pedindo…';
+    try {
+      const r = await Api.chamar('pedirCodigoSenha', { nome }, { perfil: { aparelhoId, codigo: grupo }, tempoMs: 30000 });
+      Esqueci.nome = nome;
+      Esqueci.grupo = grupo;
+      const quem = r.organizador ? `O organizador (${esc(r.organizador.nome)})` : 'O organizador';
+      $('es-info').innerHTML = `<b>Pedido enviado!</b> ${quem} vai mandar um código de 6 números para o seu WhatsApp` +
+        `${r.whatsappFinal ? ` terminado em <b>${esc(r.whatsappFinal)}</b>` : ''}. Quando chegar, digite abaixo e crie a senha nova.`;
+      $('es-passo1').classList.add('oculto');
+      $('es-passo2').classList.remove('oculto');
+      renderContatoOrganizador(r.organizador, nome);
+      setTimeout(() => $('es-cod').focus(), 50);
+    } catch (e) {
+      erroEsqueci(e.codigo === 'codigo_invalido' ? 'Código do grupo inválido. Confira com o organizador.' : mensagemErroGeral(e));
+      if (e.dados && e.dados.organizador !== undefined) renderContatoOrganizador(e.dados.organizador, nome);
+    } finally {
+      botao.disabled = false;
+      botao.textContent = 'Pedir código';
+    }
+  }
+  $('es-pedir').onclick = () => pedirCodigo();
+  $('es-pedir-de-novo').onclick = () => {
+    $('es-passo2').classList.add('oculto');
+    $('es-passo1').classList.remove('oculto');
+    erroEsqueci('');
+  };
+  $('es-trocar').onclick = async () => {
+    const codigo = $('es-cod').value.replace(/\D/g, '');
+    const senha = $('es-senha').value;
+    erroEsqueci('');
+    if (codigo.length !== 6) return erroEsqueci('Digite o código de 6 números que chegou no seu WhatsApp.');
+    if (senha.length < 4) return erroEsqueci('A senha nova precisa ter pelo menos 4 caracteres.');
+    if (senha !== $('es-senha2').value) return erroEsqueci('As duas senhas não estão iguais.');
+    if (!navigator.onLine) return erroEsqueci('Sem internet. Conecte o celular e tente de novo.');
+    const { anterior, aparelhoId } = await aparelhoParaConta();
+    const temp = { aparelhoId, codigo: Esqueci.grupo };
+    const botao = $('es-trocar');
+    botao.disabled = true;
+    botao.textContent = 'Trocando a senha…';
+    try {
+      const r = await Api.chamar('redefinirSenha', { nome: Esqueci.nome, codigoSenha: codigo, senhaNova: senha, aparelho: await Aparelho.info() },
+        { perfil: temp, tempoMs: 30000 });
+      await concluirEntrada(r, anterior, temp);
+      toast('Senha nova criada. Você já entrou na sua conta.', 4500);
+    } catch (e) {
+      erroEsqueci(mensagemErroGeral(e));
+    } finally {
+      botao.disabled = false;
+      botao.textContent = 'Trocar a senha e entrar';
+    }
+  };
+
+  // ------------------------------------------------------------------
+  //  WhatsApp das contas antigas (obrigatório a partir da V2)
+  // ------------------------------------------------------------------
+  mascaraZap($('zap-numero'));
+  function abrirTelaWhatsapp() {
+    $('zap-numero').value = '';
+    $('zap-erro').textContent = '';
+    mostrarTela('whatsapp', { empilhar: false });
+  }
+  async function salvarWhatsapp(numero) {
+    const r = await Api.chamar('salvarWhatsapp', { whatsapp: digitosZap(numero) }, { tempoMs: 20000 });
+    const p = await Perfil.obter();
+    p.whatsapp = r.whatsapp || digitosZap(numero);
+    p.precisaWhatsapp = false;
+    await Perfil.salvar(p);
+    return p;
+  }
+  $('zap-numero').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('zap-salvar').click(); } });
+  $('zap-salvar').onclick = async () => {
+    const v = $('zap-numero').value;
+    $('zap-erro').textContent = '';
+    if (!zapValido(v)) { $('zap-erro').textContent = 'Informe o WhatsApp com DDD (ex.: (83) 99999-8888).'; return; }
+    const botao = $('zap-salvar');
+    botao.disabled = true;
+    try {
+      await salvarWhatsapp(v);
+      toast('WhatsApp salvo. Obrigado!');
+      exibirInicio();
+    } catch (e) {
+      if (e.codigo === 'sessao_invalida') { iniciarBoasVindas('sessao'); return; }
+      $('zap-erro').textContent = mensagemErroGeral(e);
+    } finally {
+      botao.disabled = false;
+    }
+  };
+
+  // ------------------------------------------------------------------
+  //  Organizador: pedidos de senha nova (código para mandar pelo WhatsApp)
+  // ------------------------------------------------------------------
+  function textoCodigo(pd) {
+    const v = new Date(pd.validoAte);
+    return `Olá, ${primeiroNome(pd.nome)}! Aqui é do Controle de Gastos. Seu código para criar uma senha nova é *${pd.codigo}*.\n` +
+      `Digite no app, na tela "Esqueci minha senha". O código vale até ${v.toLocaleDateString('pt-BR')} às ` +
+      `${v.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`;
+  }
+  async function buscarPedidos(forcar = false) {
+    if (removido) return;
+    const p = await Perfil.obter();
+    if (!p || !p.token || !p.organizador || !navigator.onLine || !Api.urlConfigurada()) return;
+    if (!forcar && Date.now() - ultimaBuscaPedidos < 60000) return;
+    ultimaBuscaPedidos = Date.now();
+    let r;
+    try { r = await Api.chamar('pedidosSenha', {}, { tempoMs: 20000 }); } catch (e) { return; }
+    const antes = JSON.stringify(pedidosSenha);
+    pedidosSenha = Array.isArray(r.pedidos) ? r.pedidos : [];
+    if (r.organizador === false) {
+      const atual = await Perfil.obter();
+      if (atual && atual.organizador) { atual.organizador = false; await Perfil.salvar(atual); }
+    }
+    if (JSON.stringify(pedidosSenha) !== antes && telaAtual === 'inicio') renderInicio();
   }
 
   // ------------------------------------------------------------------
@@ -377,18 +702,19 @@
   function cartao(l, anexos) {
     const fotos = anexos.filter(a => a.tipo === 'foto').length;
     const temAudio = l.origem === 'voz';
+    const nota = l.origem === 'foto';
     let desc = l.descricao || (l.itens && l.itens.length ? l.itens.map(i => i.nome).filter(Boolean).join(', ') : '');
     if (!desc) {
-      desc = l.status === 'aguardando_ia' ? 'Áudio aguardando interpretação'
-        : l.status === 'erro_ia' ? 'Áudio não interpretado' : (l.categoria || 'Lançamento');
+      desc = l.status === 'aguardando_ia' ? (nota ? 'Nota aguardando leitura' : 'Áudio aguardando interpretação')
+        : l.status === 'erro_ia' ? (nota ? 'Nota não lida' : 'Áudio não interpretado') : (l.categoria || 'Lançamento');
     }
     const meta = [hora(l.dataHora), l.categoria, l.meioPagamento].filter(Boolean).join(' · ');
     const selos = [];
     if (l.status === 'revisar') selos.push('<span class="selo revisar">Revisar</span>');
-    if (l.status === 'aguardando_ia') selos.push('<span class="selo aguardando">Aguardando IA</span>');
+    if (l.status === 'aguardando_ia') selos.push(`<span class="selo aguardando">${nota ? 'Aguardando leitura' : 'Aguardando IA'}</span>`);
     if (l.status === 'erro_ia') selos.push('<span class="selo erro">Preencher</span>');
     if (l.sync === 'pendente' || anexos.some(a => !a.enviado && a.blob)) selos.push('<span class="selo fila">Na fila</span>');
-    const icones = (fotos ? `📷${fotos > 1 ? fotos : ''} ` : '') + (temAudio ? '🎤 ' : '') + (l.lat != null ? '📍' : '');
+    const icones = (nota ? `🧾${fotos > 1 ? fotos : ''} ` : fotos ? `📷${fotos > 1 ? fotos : ''} ` : '') + (temAudio ? '🎤 ' : '') + (l.lat != null ? '📍' : '');
     return `<div class="cartao" data-id="${esc(l.id)}">
       <div><div class="desc">${esc(desc)}</div><div class="meta">${esc(meta)} ${icones}</div></div>
       <div class="direita"><span class="valor">${l.valorTotal != null ? brl(l.valorTotal) : '—'}</span>${selos.join('')}</div>
@@ -400,6 +726,7 @@
   }
 
   async function renderInicio() {
+    if (removido) return;
     const perfil = await Perfil.obter();
     if (!perfil || !perfil.token) { iniciarBoasVindas(motivoEntrada(perfil)); return; }
     $('ini-nome').textContent = 'Olá, ' + perfil.nome;
@@ -438,20 +765,35 @@
     if (!Api.urlConfigurada()) html.push(alerta('vermelho', 'O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).'));
     if (perfil.codigoInvalido) html.push(alerta('vermelho', 'Código do grupo inválido. Corrija nas configurações.', 'Corrigir', 'abrir-config'));
     if (swEsperando) html.push(alerta('azul', 'Há uma nova versão do app.', 'Atualizar', 'atualizar-app'));
-    const revisar = lancs.filter(l => l.status === 'revisar').length;
-    if (revisar) {
-      html.push(alerta('azul', revisar === 1 ? '1 áudio foi interpretado e está pronto para revisar.'
-        : `${revisar} áudios foram interpretados e estão prontos para revisar.`, 'Revisar', 'revisar'));
+    // organizador: pedidos de senha nova (manda o código pelo WhatsApp da pessoa)
+    const vistos = await Banco.lerConfig('pedidosVistos', []);
+    pedidosSenha.filter(pd => !vistos.includes(pd.contaId + '|' + pd.codigo)).forEach((pd) => {
+      html.push(`<div class="alerta-caixa laranja coluna"><span>🔑 <b>${esc(pd.nome)}</b> pediu uma senha nova. Código: <b class="codigo">${esc(pd.codigo)}</b></span>` +
+        `<div class="linha-botoes"><a class="botao pequeno zap" target="_blank" rel="noopener" href="${esc(linkZap(pd.whatsapp, textoCodigo(pd)))}">Enviar pelo WhatsApp</a>` +
+        `<button class="botao pequeno" data-acao="pedido-ok" data-pedido="${esc(pd.contaId + '|' + pd.codigo)}">Já enviei</button></div></div>`);
+    });
+    const revisar = lancs.filter(l => l.status === 'revisar');
+    if (revisar.length) {
+      const notas = revisar.filter(l => l.origem === 'foto').length;
+      const audios = revisar.length - notas;
+      const texto = !notas ? (audios === 1 ? '1 áudio foi interpretado e está pronto para revisar.' : `${audios} áudios foram interpretados e estão prontos para revisar.`)
+        : !audios ? (notas === 1 ? '1 nota foi lida e está pronta para revisar.' : `${notas} notas foram lidas e estão prontas para revisar.`)
+          : `${revisar.length} lançamentos (áudios e notas) estão prontos para revisar.`;
+      html.push(alerta('azul', texto, 'Revisar', 'revisar'));
     }
-    const erros = lancs.filter(l => l.status === 'erro_ia').length;
-    if (erros) {
-      html.push(alerta('vermelho', erros === 1 ? 'A IA não conseguiu interpretar 1 áudio. Preencha você mesmo.'
-        : `A IA não conseguiu interpretar ${erros} áudios. Preencha você mesmo.`, 'Ver', 'erro-ia'));
+    const comErro = lancs.filter(l => l.status === 'erro_ia');
+    if (comErro.length) {
+      const notas = comErro.filter(l => l.origem === 'foto').length;
+      const audios = comErro.length - notas;
+      const texto = !notas ? (audios === 1 ? 'A IA não conseguiu interpretar 1 áudio. Preencha você mesmo.' : `A IA não conseguiu interpretar ${audios} áudios. Preencha você mesmo.`)
+        : !audios ? (notas === 1 ? 'Não foi possível ler 1 nota. Preencha você mesmo.' : `Não foi possível ler ${notas} notas. Preencha você mesmo.`)
+          : `${comErro.length} lançamentos não foram lidos pela IA. Preencha você mesmo.`;
+      html.push(alerta('vermelho', texto, 'Ver', 'erro-ia'));
     }
     const aguardando = lancs.filter(l => l.status === 'aguardando_ia').length;
     const limite = await Banco.lerConfig('iaLimite', null);
     if (aguardando && limite && Date.now() - limite < 6 * 3600 * 1000) {
-      html.push(alerta('laranja', 'O limite gratuito da IA foi atingido. Os áudios serão interpretados automaticamente mais tarde.'));
+      html.push(alerta('laranja', 'O limite gratuito da IA foi atingido. Os áudios e as notas serão lidos automaticamente mais tarde.'));
     }
     if (mostrarAvisoChrome()) {
       // no Chrome a pessoa entra com o mesmo nome e senha; antes disso, o que está pendente precisa ser enviado
@@ -477,6 +819,7 @@
   }
 
   async function atualizarIconeSync() {
+    if (removido) return;
     const btn = $('btn-sync');
     let estado = 'ok';
     let titulo = 'Tudo sincronizado';
@@ -522,6 +865,11 @@
     if (!b) return;
     const acao = b.dataset.acao;
     if (acao === 'abrir-config') abrirConfig();
+    if (acao === 'pedido-ok') {
+      const vistos = (await Banco.lerConfig('pedidosVistos', [])).concat(b.dataset.pedido).slice(-50);
+      await Banco.gravarConfig('pedidosVistos', vistos);
+      renderInicio();
+    }
     if (acao === 'atualizar-app' && swEsperando) { pedimosAtualizacao = true; swEsperando.postMessage('atualizar'); }
     if (acao === 'revisar' || acao === 'erro-ia') {
       const alvo = acao === 'revisar' ? 'revisar' : 'erro_ia';
@@ -543,6 +891,7 @@
     Sync.sincronizar({ manual: true });
   };
   $('btn-voz').onclick = () => abrirVoz();
+  $('btn-foto').onclick = () => abrirFoto();
   $('btn-texto').onclick = () => abrirNovoTexto();
   $('ini-config').onclick = () => abrirConfig();
 
@@ -569,14 +918,9 @@
     capturarGpsForm(Form.token);
   }
 
+  // a localização é registrada sem aparecer na tela
   function capturarGpsForm(token) {
-    const el = $('f-gps');
-    el.textContent = '📍 Obtendo localização…';
-    obterLocalizacao().then(pos => {
-      if (Form.token !== token) return;
-      Form.gps = pos;
-      renderGps(el, pos, () => capturarGpsForm(token));
-    });
+    obterLocalizacao().then(pos => { if (Form.token === token) Form.gps = pos; });
   }
 
   async function abrirLancamento(id) {
@@ -606,15 +950,10 @@
     $('f-titular').value = l.titular || '';
     $('f-estab').value = l.estabelecimento || '';
     $('f-itens').innerHTML = '';
-    (l.itens || []).forEach(i => addItem(i.nome, i.valor));
+    (l.itens || []).forEach(i => addItem(i));
     atualizarSoma();
     await renderCaixaIA();
     await renderFotosForm();
-    if (Form.modo !== 'novo') {
-      $('f-gps').textContent = l.lat != null
-        ? '📍 ' + (l.endereco || `Localização registrada (±${l.precisao || '?'} m)`)
-        : '📍 Sem localização registrada.';
-    }
     $('form-salvar').textContent = Form.modo === 'revisar' ? 'Confirmar' : 'Salvar';
     $('form-excluir').classList.toggle('oculto', Form.modo === 'novo');
   }
@@ -622,6 +961,7 @@
   async function renderCaixaIA() {
     const l = Form.l;
     const el = $('form-ia');
+    if (l.origem === 'foto') { renderCaixaNota(); return; }
     if (l.origem !== 'voz') { el.innerHTML = ''; return; }
     const audio = (await Banco.porIndice('arquivos', 'lancamentoId', l.id)).find(a => a.tipo === 'audio');
     const player = audio && audio.blob
@@ -645,18 +985,56 @@
     el.innerHTML = `<div class="caixa-ia ${classe}">${msg}${transc}${obs}${player}</div>`;
   }
 
-  function addItem(nome = '', valor = null) {
+  function renderCaixaNota() {
+    const l = Form.l;
+    const fonte = { sefaz: 'do site da SEFAZ (pelo QR Code da nota)', ia: 'da foto da nota, pela IA', 'sefaz+ia': 'da nota pela IA (foto e site da SEFAZ)' }[l.fonteDados] || '';
+    let classe = '';
+    let msg = '';
+    if (l.status === 'aguardando_ia') {
+      classe = 'laranja';
+      msg = '<b>Aguardando a leitura da nota.</b> Ela é lida quando for enviada (no Wi-Fi ou pelas setas lá em cima). Se preferir, preencha você mesmo: com valor e categoria preenchidos, o lançamento fica confirmado.';
+    } else if (l.status === 'revisar') {
+      msg = `<b>Os dados vieram ${fonte || 'da nota'}.</b> Confira, corrija se precisar e toque em Confirmar.`;
+    } else if (l.status === 'erro_ia') {
+      classe = 'vermelho';
+      msg = '<b>Não foi possível ler esta nota.</b> Veja a foto abaixo e preencha os campos.';
+    } else {
+      msg = `<b>Lançamento feito pela foto da nota.</b>${fonte ? ` Dados lidos ${fonte}.` : ''}`;
+    }
+    const obs = l.observacaoIA ? `<div class="dica">${esc(l.observacaoIA)}</div>` : '';
+    $('form-ia').innerHTML = `<div class="caixa-ia ${classe}">${msg}${obs}</div>`;
+  }
+
+  // item: nome; quantidade × preço de cada = valor (o valor é calculado sozinho)
+  function addItem(i = {}) {
     const div = document.createElement('div');
     div.className = 'item-linha';
-    div.innerHTML = `<input placeholder="Item" value="${esc(nome)}"><input placeholder="Valor" inputmode="decimal" value="${valor != null ? esc(valorParaCampo(valor)) : ''}"><button type="button" aria-label="Remover item">✕</button>`;
+    div.innerHTML = `<input class="i-nome" placeholder="Item" autocapitalize="sentences" value="${esc(i.nome || '')}">` +
+      '<button type="button" aria-label="Remover item">✕</button>' +
+      `<div class="item-calc"><input class="i-qtd" inputmode="decimal" placeholder="Qtd" aria-label="Quantidade" value="${esc(qtdParaCampo(i.qtd))}">` +
+      `<span>×</span><input class="i-unit" inputmode="decimal" placeholder="Preço un." aria-label="Preço de cada" value="${esc(unitParaCampo(i.unitario))}">` +
+      `<span>=</span><input class="i-valor" inputmode="decimal" placeholder="Valor" aria-label="Valor do item" value="${i.valor != null ? esc(valorParaCampo(i.valor)) : ''}"></div>`;
+    const q = div.querySelector('.i-qtd');
+    const u = div.querySelector('.i-unit');
+    const v = div.querySelector('.i-valor');
+    const calcular = () => {
+      const nq = lerQtd(q.value);
+      const nu = lerUnit(u.value);
+      if (nq != null && nu != null) v.value = valorParaCampo(Math.round(nq * nu * 100) / 100);
+    };
+    q.addEventListener('input', calcular);
+    u.addEventListener('input', calcular);
     div.querySelector('button').onclick = () => { div.remove(); Form.alterado = true; atualizarSoma(); };
-    div.querySelectorAll('input').forEach(i => i.addEventListener('input', atualizarSoma));
+    div.querySelectorAll('input').forEach(x => x.addEventListener('input', atualizarSoma));
     $('f-itens').appendChild(div);
   }
   function lerItensForm() {
     return Array.from($('f-itens').querySelectorAll('.item-linha')).map(d => {
-      const campos = d.querySelectorAll('input');
-      return { nome: campos[0].value.trim(), valor: lerValor(campos[1].value) };
+      const qtd = lerQtd(d.querySelector('.i-qtd').value);
+      const unitario = lerUnit(d.querySelector('.i-unit').value);
+      let valor = lerValor(d.querySelector('.i-valor').value);
+      if (valor == null && qtd != null && unitario != null) valor = Math.round(qtd * unitario * 100) / 100;
+      return { nome: d.querySelector('.i-nome').value.trim(), qtd, unitario, valor };
     }).filter(i => i.nome || i.valor != null);
   }
   function atualizarSoma() {
@@ -692,27 +1070,51 @@
     renderFotosForm();
   });
 
-  /** Abre a tela de recorte para cada foto escolhida; guarda as que a pessoa usar. */
-  async function adicionarFotos(input, destino) {
+  /** Abre a tela de recorte para cada foto escolhida na galeria; guarda as que a pessoa usar. */
+  async function adicionarFotos(input, destino, opcoes = {}) {
     const arquivos = Array.from(input.files || []);
     input.value = '';
     let n = 0;
     for (let i = 0; i < arquivos.length; i++) {
       try {
-        const blob = await Recorte.abrir(arquivos[i], { titulo: arquivos.length > 1 ? `Foto ${i + 1} de ${arquivos.length}` : '' });
-        if (blob === undefined) break; // "voltar" do Android: desiste das fotos restantes
-        if (blob) { destino.push({ id: novoId(), blob }); n++; }
+        const r = await Recorte.abrir(arquivos[i], Object.assign({ titulo: arquivos.length > 1 ? `Foto ${i + 1} de ${arquivos.length}` : '' }, opcoes));
+        if (r.acao === 'voltar') break; // "voltar" do Android: desiste das fotos restantes
+        if (r.acao === 'usar') { destino.push({ id: novoId(), blob: r.blob, qr: r.qr || null }); n++; }
       } catch (e) {
         toast('Não foi possível usar uma das fotos: ' + e.message, 4500);
       }
     }
     return n;
   }
-  const aoEscolherFotoForm = async (e) => {
+  // câmera do app (ou a do celular, se a pessoa preferir nas configurações)
+  function obterFotoCamera(titulo) {
+    if (prefCameraSistema || !Camera.suportada()) return Camera.abrirSistema();
+    return Camera.abrir({ titulo });
+  }
+  /** Tira a foto e vai direto para o recorte ("Repetir foto" volta para a câmera). Devolve quantas fotos foram guardadas. */
+  async function tirarFotos(destino, opcoes = {}) {
+    for (;;) {
+      const arquivo = await obterFotoCamera(opcoes.tituloCamera);
+      if (!arquivo) return 0;
+      let r;
+      try {
+        r = await Recorte.abrir(arquivo, Object.assign({ repetir: true }, opcoes));
+      } catch (e) {
+        toast('Não foi possível usar a foto: ' + e.message, 4500);
+        return 0;
+      }
+      if (r.acao === 'repetir') continue;
+      if (r.acao === 'usar') { destino.push({ id: novoId(), blob: r.blob, qr: r.qr || null }); return 1; }
+      return 0;
+    }
+  }
+  const OPCOES_COMPROVANTE = { tituloCamera: 'Foto da nota ou comprovante' };
+  $('f-camera').onclick = async () => {
+    if (await tirarFotos(Form.fotosNovas, OPCOES_COMPROVANTE)) { Form.alterado = true; renderFotosForm(); }
+  };
+  $('f-galeria').onchange = async (e) => {
     if (await adicionarFotos(e.target, Form.fotosNovas)) { Form.alterado = true; renderFotosForm(); }
   };
-  $('f-camera').onchange = aoEscolherFotoForm;
-  $('f-galeria').onchange = aoEscolherFotoForm;
 
   async function salvarForm() {
     const l = Form.l;
@@ -752,7 +1154,7 @@
       // pega o estado mais recente salvo no aparelho (a sincronização pode ter atualizado algo)
       const salvo = await Banco.obter('lancamentos', l.id);
       if (salvo) {
-        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio'].forEach(k => {
+        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'].forEach(k => {
           if (salvo[k] !== undefined) l[k] = salvo[k];
         });
       }
@@ -823,14 +1225,9 @@
     capturarGpsVoz(Voz.token);
   }
 
+  // a localização é registrada sem aparecer na tela
   function capturarGpsVoz(token) {
-    const el = $('voz-gps');
-    el.textContent = '📍 Obtendo localização…';
-    obterLocalizacao().then(pos => {
-      if (Voz.token !== token) return;
-      Voz.gps = pos;
-      renderGps(el, pos, () => capturarGpsVoz(token));
-    });
+    obterLocalizacao().then(pos => { if (Voz.token === token) Voz.gps = pos; });
   }
 
   function atualizarTempo() {
@@ -880,9 +1277,8 @@
     Voz.fotos = Voz.fotos.filter(f => f.id !== id);
     renderFotosVoz();
   });
-  const aoEscolherFotoVoz = async (e) => { if (await adicionarFotos(e.target, Voz.fotos)) renderFotosVoz(); };
-  $('voz-camera').onchange = aoEscolherFotoVoz;
-  $('voz-galeria').onchange = aoEscolherFotoVoz;
+  $('voz-camera').onclick = async () => { if (await tirarFotos(Voz.fotos, OPCOES_COMPROVANTE)) renderFotosVoz(); };
+  $('voz-galeria').onchange = async (e) => { if (await adicionarFotos(e.target, Voz.fotos)) renderFotosVoz(); };
 
   $('voz-salvar').onclick = async () => {
     if (Gravador.gravando()) await pararGravacao();
@@ -922,16 +1318,174 @@
   $('voz-voltar').onclick = () => voltar();
 
   // ------------------------------------------------------------------
+  //  Lançar por foto: fotos da nota fiscal (o servidor lê pela SEFAZ ou pela IA)
+  // ------------------------------------------------------------------
+  const Foto = { fotos: [], gps: null, token: null };
+  const OPCOES_NOTA = { lerQr: true, ladoMaximo: 2400, qualidade: 0.8, tituloCamera: 'Foto da nota' };
+
+  function qrDaNota() {
+    const f = Foto.fotos.find(x => x.qr);
+    return f ? f.qr : '';
+  }
+  function renderFotoNota() {
+    $('foto-lista').innerHTML = Foto.fotos.map(f => miniatura(f.blob, 'n:' + f.id)).join('') || '<small class="dica">Nenhuma foto ainda.</small>';
+    const qr = qrDaNota();
+    const el = $('foto-qr');
+    el.className = 'foto-qr' + (qr ? ' achou' : '');
+    el.textContent = !Foto.fotos.length ? ''
+      : qr ? '✓ QR Code da nota encontrado: os dados virão do site da SEFAZ.'
+        : 'QR Code não encontrado nas fotos: a IA vai ler a nota.';
+    $('foto-camera').textContent = Foto.fotos.length ? '📷 Tirar mais uma foto desta nota' : '📷 Tirar foto';
+    $('foto-salvar').disabled = !Foto.fotos.length;
+  }
+  async function tirarFotoNota() {
+    const titulo = Foto.fotos.length ? `Foto ${Foto.fotos.length + 1} da nota` : 'Foto da nota';
+    if (await tirarFotos(Foto.fotos, Object.assign({ titulo }, OPCOES_NOTA))) renderFotoNota();
+  }
+  async function abrirFoto() {
+    const p = await Perfil.obter();
+    if (p && p.servidorAntigo) {
+      toast('O servidor ainda está na versão antiga e não lê notas por foto. Avise o organizador para atualizar o Apps Script.', 6000);
+      return;
+    }
+    Foto.fotos = [];
+    Foto.gps = null;
+    Foto.token = novoId();
+    const token = Foto.token;
+    renderFotoNota();
+    mostrarTela('foto');
+    obterLocalizacao().then(pos => { if (Foto.token === token) Foto.gps = pos; });
+    tirarFotoNota(); // já abre a câmera
+  }
+  $('foto-camera').onclick = () => tirarFotoNota();
+  $('foto-galeria').onchange = async (e) => { if (await adicionarFotos(e.target, Foto.fotos, OPCOES_NOTA)) renderFotoNota(); };
+  $('foto-lista').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-remover]');
+    if (!b) return;
+    const id = b.dataset.remover.split(/:(.+)/)[1];
+    Foto.fotos = Foto.fotos.filter(f => f.id !== id);
+    renderFotoNota();
+  });
+  $('foto-voltar').onclick = () => voltar();
+  $('foto-salvar').onclick = async () => {
+    if (!Foto.fotos.length) return;
+    const agora = Date.now();
+    const gps = Foto.gps || {};
+    const l = {
+      id: novoId(), origem: 'foto', status: 'aguardando_ia', dataHora: agora, criadoEm: agora, alteradoEm: agora,
+      descricao: '', itens: [], valorTotal: null, categoria: '', meioPagamento: '', banco: '', titular: '', estabelecimento: '',
+      qrNota: qrDaNota(), fotosNota: Foto.fotos.length,
+      lat: gps.lat != null ? gps.lat : null, lng: gps.lng != null ? gps.lng : null, precisao: gps.precisao != null ? gps.precisao : null,
+      sync: 'pendente', versaoBase: 0
+    };
+    $('foto-salvar').disabled = true;
+    try {
+      await Banco.gravar('lancamentos', l);
+      for (let i = 0; i < Foto.fotos.length; i++) {
+        const f = Foto.fotos[i];
+        await Banco.gravar('arquivos', {
+          id: f.id, lancamentoId: l.id, tipo: 'foto', mime: 'image/jpeg', blob: f.blob,
+          tamanho: f.blob.size, criadoEm: agora + i, enviado: false // a ordem das fotos é a ordem da nota
+        });
+      }
+    } catch (e) {
+      toast('Não foi possível salvar no aparelho: ' + e.message, 5000);
+      $('foto-salvar').disabled = false;
+      return;
+    }
+    toast(Sync.conexao() === 'wifi'
+      ? 'Nota salva. Enviando para leitura…'
+      : 'Nota salva no celular. Para enviar, toque nas setas vermelhas lá em cima (no Wi-Fi é automático).', 5000);
+    concluirEVoltar();
+    agendarSync(500);
+  };
+
+  // ------------------------------------------------------------------
   //  Configurações
   // ------------------------------------------------------------------
+  const SVG_OLHO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
+  const SVG_OLHO_CORTADO = $('cfg-olho').innerHTML;
+
+  function renderConta(p) {
+    $('cfg-conta').innerHTML = `<b>${esc(p.nome)}</b><small>Conta conectada neste celular</small>` +
+      `<small>WhatsApp: ${p.whatsapp ? esc(formatarZap(p.whatsapp)) : 'não cadastrado'}</small>`;
+  }
+  /** O código do grupo fica embaçado; o olho no fim do campo mostra (e só então dá para salvar). */
+  function esconderCodigo(esconder) {
+    const campo = $('cfg-codigo');
+    campo.classList.toggle('embacado', esconder);
+    campo.readOnly = esconder;
+    $('cfg-salvar').disabled = esconder;
+    const olho = $('cfg-olho');
+    olho.innerHTML = esconder ? SVG_OLHO_CORTADO : SVG_OLHO;
+    olho.setAttribute('aria-label', esconder ? 'Mostrar o código' : 'Esconder o código');
+    olho.title = esconder ? 'Mostrar o código' : 'Esconder o código';
+  }
+  $('cfg-olho').onclick = () => {
+    const mostrar = $('cfg-codigo').classList.contains('embacado');
+    esconderCodigo(!mostrar);
+    if (mostrar) $('cfg-codigo').focus();
+  };
+
   async function abrirConfig() {
     const p = await Perfil.obter();
     if (!p || !p.token) { iniciarBoasVindas(motivoEntrada(p)); return; }
-    $('cfg-conta').innerHTML = `<b>${esc(p.nome)}</b><small>Conta conectada neste celular</small>`;
+    renderConta(p);
     $('cfg-codigo').value = p.codigo;
+    esconderCodigo(true);
+    $('cfg-camera-sistema').checked = prefCameraSistema;
     mostrarTela('config');
     await renderInfo();
   }
+
+  $('cfg-novidades').onclick = () => abrirNovidades();
+  $('cfg-camera-sistema').onchange = async (e) => {
+    prefCameraSistema = e.target.checked;
+    await Banco.gravarConfig('cameraSistema', prefCameraSistema);
+    toast(prefCameraSistema ? 'As fotos vão usar a câmera do celular.' : 'As fotos vão usar a câmera do app.');
+  };
+  $('cfg-zap').onclick = async () => {
+    const p = await Perfil.obter();
+    await dialogoCampos({
+      titulo: 'Alterar WhatsApp',
+      texto: 'O número é usado se você esquecer a senha: o organizador manda um código para ele.',
+      campos: [{ id: 'dlg-zap', rotulo: 'WhatsApp com DDD', tipo: 'tel', inputmode: 'tel', autocomplete: 'tel-national', placeholder: '(83) 99999-8888', valor: formatarZap(p.whatsapp || ''), mascaraZap: true }],
+      sim: 'Salvar',
+      aoConfirmar: async (v) => {
+        if (!zapValido(v['dlg-zap'])) return 'Informe o WhatsApp com DDD (ex.: (83) 99999-8888).';
+        if (!navigator.onLine) return 'Sem internet. Conecte o celular e tente de novo.';
+        try {
+          renderConta(await salvarWhatsapp(v['dlg-zap']));
+          toast('WhatsApp salvo.');
+          return '';
+        } catch (e) {
+          return mensagemErroGeral(e);
+        }
+      }
+    });
+  };
+  $('cfg-senha').onclick = () => dialogoCampos({
+    titulo: 'Trocar senha',
+    texto: 'Os outros celulares em que você já entrou continuam conectados.',
+    campos: [
+      { id: 'dlg-s1', rotulo: 'Senha nova', tipo: 'password', autocomplete: 'new-password', placeholder: 'Mínimo 4 dígitos ou letras' },
+      { id: 'dlg-s2', rotulo: 'Repita a senha nova', tipo: 'password', autocomplete: 'new-password' }
+    ],
+    mostrarSenha: true,
+    sim: 'Trocar senha',
+    aoConfirmar: async (v) => {
+      if (v['dlg-s1'].length < 4) return 'A senha precisa ter pelo menos 4 caracteres.';
+      if (v['dlg-s1'] !== v['dlg-s2']) return 'As duas senhas não estão iguais.';
+      if (!navigator.onLine) return 'Sem internet. Conecte o celular e tente de novo.';
+      try {
+        await Api.chamar('trocarSenha', { senhaNova: v['dlg-s1'] }, { tempoMs: 20000 });
+        toast('Senha trocada. Use a senha nova para entrar em outros celulares.', 4500);
+        return '';
+      } catch (e) {
+        return mensagemErroGeral(e);
+      }
+    }
+  });
 
   async function renderInfo() {
     const p = await Perfil.obter();
@@ -946,7 +1500,7 @@
     } catch (x) { /* opcional */ }
     const itens = [
       ['Aparelho', p.aparelhoId.slice(0, 8)],
-      ['Versão do app', VERSAO_DO_APP],
+      ['Versão do app', 'V' + VERSAO_DO_APP],
       ['Conexão', NOMES_CONEXAO[Sync.conexao()]],
       ['Aguardando envio', String(await Sync.pendentes())],
       ['Última sincronização', ultima ? quando(ultima) : 'nunca'],
@@ -957,6 +1511,7 @@
   }
 
   $('cfg-salvar').onclick = async () => {
+    if ($('cfg-codigo').classList.contains('embacado')) return; // só salva com o código à mostra
     const codigo = $('cfg-codigo').value.trim();
     if (!codigo) { toast('Informe o código do grupo.'); return; }
     const p = await Perfil.obter();
@@ -1007,12 +1562,64 @@
   };
   $('cfg-voltar').onclick = () => voltar();
 
+  // Remover app: apaga tudo o que o app guardou neste celular (o que foi enviado continua no servidor)
+  async function esperarSync() {
+    const limite = Date.now() + 120000;
+    while (Sync.estaRodando() && Date.now() < limite) await new Promise(ok => setTimeout(ok, 300));
+  }
+  async function removerApp() {
+    removido = true;
+    clearTimeout(agendado);
+    toast('Removendo…', 20000);
+    try { await Api.chamar('sair', {}, { tempoMs: 8000 }); } catch (e) { /* sem internet: a sessão só deixa de ser usada */ }
+    try { await Banco.apagarTudo(); } catch (e) { /* segue */ }
+    try { if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (e) { /* segue */ }
+    try {
+      if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    } catch (e) { /* segue */ }
+    try { localStorage.clear(); sessionStorage.clear(); } catch (e) { /* segue */ }
+    $('toast').classList.add('oculto');
+    $('dialogo').innerHTML = '';
+    mostrarTela('removido', { empilhar: false });
+  }
+  $('cfg-remover').onclick = async () => {
+    const n = await Sync.pendentes();
+    if (n > 0) {
+      const escolha = await escolher(
+        `${plural(n, 'Há 1 lançamento que ainda não foi enviado', 'Há # lançamentos que ainda não foram enviados')} ao servidor. ` +
+        `Removendo o app sem enviar, ${plural(n, 'ele será perdido', 'eles serão perdidos')}.`,
+        [{ valor: 'enviar', texto: 'Enviar e remover', classe: 'primario' }, { valor: 'remover', texto: 'Remover sem enviar', classe: 'perigo' }, { valor: null, texto: 'Cancelar' }]);
+      if (!escolha) return;
+      if (escolha === 'enviar') {
+        if (Sync.conexao() === 'offline') { toast('Sem internet. Conecte o celular para enviar antes de remover.', 4500); return; }
+        toast('Enviando seus lançamentos…', 60000);
+        await esperarSync();
+        await Sync.sincronizar({ manual: true });
+        const faltam = await Sync.pendentes();
+        if (faltam > 0) { toast('Não foi possível enviar tudo. Tente de novo com uma internet melhor.', 5000); return; }
+      }
+    } else if (!await confirmar('Remover o app deste celular? Tudo o que o app guardou aqui (lançamentos, fotos e áudios) será apagado deste celular. ' +
+        'Seus lançamentos continuam guardados no servidor: para voltar, abra o link do app e entre com seu nome e senha.', 'Remover', 'Cancelar')) {
+      return;
+    }
+    await esperarSync();
+    await removerApp();
+  };
+
   // ------------------------------------------------------------------
   //  Sincronização automática (só no Wi-Fi) e o ícone do topo
   // ------------------------------------------------------------------
   function agendarSync(atraso = 1500) {
+    if (removido) return;
     clearTimeout(agendado);
-    agendado = setTimeout(() => { if (Sync.conexao() === 'wifi') Sync.sincronizar(); }, atraso);
+    agendado = setTimeout(() => { if (!removido && Sync.conexao() === 'wifi') Sync.sincronizar(); }, atraso);
+  }
+  function textoLidos(r) {
+    const notas = r.notas || 0;
+    const audios = (r.interpretados || 0) - notas;
+    if (notas && !audios) return notas === 1 ? 'Uma nota foi lida. Toque em Revisar.' : `${notas} notas foram lidas. Toque em Revisar.`;
+    if (audios && !notas) return audios === 1 ? 'Um áudio foi interpretado. Toque em Revisar.' : `${audios} áudios interpretados. Toque em Revisar.`;
+    return `${r.interpretados} lançamentos prontos para revisar. Toque em Revisar.`;
   }
 
   let ultimoAvisoErro = { msg: '', quando: 0 };
@@ -1030,14 +1637,15 @@
         if (faltam === 0 && !r.erros.length) rotulo('Sincronizado', 'verde', 2500);
         else rotulo('');
       }
-      if (r.interpretados) toast(r.interpretados === 1 ? 'Um áudio foi interpretado. Toque em Revisar.' : `${r.interpretados} áudios interpretados. Toque em Revisar.`, 4500);
-      else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios serão interpretados mais tarde.', 4500);
+      if (r.interpretados) toast(textoLidos(r), 4500);
+      else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios e as notas serão lidos mais tarde.', 4500);
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
       else if (r.erros.length) toast('Alguns itens não foram enviados; vou tentar de novo.', 4000);
       else if (d.manual && telaAtual === 'config') toast('Sincronização concluída.');
       if (telaAtual === 'inicio') renderInicio();
       else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
+      buscarPedidos();
       return;
     }
     if (d.estado === 'falhou' || d.estado === 'erro') {
@@ -1060,16 +1668,18 @@
     atualizarIconeSync();
   });
 
-  window.addEventListener('online', () => { atualizarIconeSync(); agendarSync(); });
+  window.addEventListener('online', () => { atualizarIconeSync(); agendarSync(); buscarPedidos(); });
   window.addEventListener('offline', () => atualizarIconeSync());
   if (navigator.connection && navigator.connection.addEventListener) {
     navigator.connection.addEventListener('change', () => { atualizarIconeSync(); agendarSync(); });
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { atualizarIconeSync(); agendarSync(500); }
+    if (document.visibilityState === 'visible' && !removido) { atualizarIconeSync(); agendarSync(500); buscarPedidos(); }
   });
   setInterval(async () => {
-    if (document.visibilityState !== 'visible' || Sync.conexao() !== 'wifi' || Sync.estaRodando()) return;
+    if (removido || document.visibilityState !== 'visible') return;
+    buscarPedidos(); // organizador: pedidos de senha (no máximo 1 consulta por minuto)
+    if (Sync.conexao() !== 'wifi' || Sync.estaRodando()) return;
     const p = await Perfil.obter();
     if (!p || !p.token) return;
     const n = await Sync.pendentes();
@@ -1135,10 +1745,18 @@
       return;
     }
     try { await limparArquivosAntigos(); } catch (e) { /* não impede o uso */ }
+    $('ini-versao').textContent = 'v' + VERSAO_DO_APP;
+    prefCameraSistema = !!(await Banco.lerConfig('cameraSistema', false));
     const perfil = await Perfil.obter();
     if (!perfil || !perfil.token) { iniciarBoasVindas(motivoEntrada(perfil)); return; }
-    exibirInicio();
+    await exibirInicio();
     agendarSync(800);
+    buscarPedidos(true);
+    // "O que há de novo" abre sozinho uma vez depois de cada atualização
+    if ((await Banco.lerConfig('versaoVista', null)) !== VERSAO_DO_APP) {
+      await Banco.gravarConfig('versaoVista', VERSAO_DO_APP);
+      setTimeout(abrirNovidades, 700);
+    }
   }
 
   iniciar();

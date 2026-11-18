@@ -13,9 +13,9 @@ const Sync = (() => {
 
   // Campos que a pessoa edita no aparelho
   const CAMPOS_EDITAVEIS = ['dataHora', 'descricao', 'itens', 'valorTotal', 'categoria', 'meioPagamento', 'banco',
-    'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm'];
+    'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm', 'qrNota', 'fotosNota'];
   // Campos que só o servidor preenche
-  const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio'];
+  const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'];
 
   function conexao() {
     if (!navigator.onLine) return 'offline';
@@ -144,9 +144,17 @@ const Sync = (() => {
 
   async function aplicarPerfilServidor(r) {
     const perfil = await Perfil.obter();
-    if (perfil && r.nome && r.nome !== perfil.nome) {
-      perfil.nome = r.nome; // o organizador pode ter corrigido o nome da conta
-      await Perfil.salvar(perfil);
+    if (perfil) {
+      let mudou = false;
+      if (r.nome && r.nome !== perfil.nome) { perfil.nome = r.nome; mudou = true; } // o organizador pode ter corrigido o nome
+      // WhatsApp da conta e se ela é a do organizador (servidor V2)
+      ['whatsapp', 'precisaWhatsapp', 'organizador'].forEach((k) => {
+        if (r[k] !== undefined && r[k] !== perfil[k]) { perfil[k] = r[k]; mudou = true; }
+      });
+      // servidor da versão 1.1 (ainda não atualizado): não sabe ler notas por foto
+      const antigo = r.precisaWhatsapp === undefined;
+      if (!!perfil.servidorAntigo !== antigo) { perfil.servidorAntigo = antigo; mudou = true; }
+      if (mudou) await Perfil.salvar(perfil);
     }
     if (r.listas && r.listas.categorias && r.listas.categorias.length) await Banco.gravarConfig('listas', r.listas);
   }
@@ -182,7 +190,7 @@ const Sync = (() => {
     const primeiraVez = !(await Banco.lerConfig('desde', 0)); // logo depois de entrar na conta: traz o histórico
     const visivel = manual || primeiraVez || (!somenteBaixar && (await pendentes()) > 0);
     avisar('sincronizando', { manual, visivel });
-    const resumo = { enviados: 0, arquivos: 0, interpretados: 0, novos: 0, limite: false, iaIndisponivel: '', erros: [] };
+    const resumo = { enviados: 0, arquivos: 0, interpretados: 0, notas: 0, novos: 0, limite: false, iaIndisponivel: '', erros: [] };
     try {
       if (!somenteBaixar) {
         // 1) exclusões feitas no aparelho
@@ -239,7 +247,7 @@ const Sync = (() => {
           await Banco.apagar('arquivos', a.id);
         }
 
-        // 5) interpretar áudios que já estão no servidor
+        // 5) interpretar áudios e ler notas que já estão no servidor
         //    (depois de bater no limite gratuito, só tenta de novo após 30 min ou pelo botão;
         //     enquanto isso a rotina do servidor continua tentando sozinha)
         const limiteEm = await Banco.lerConfig('iaLimite', null);
@@ -248,14 +256,16 @@ const Sync = (() => {
           .filter(x => x.status === 'aguardando_ia' && x.sync === 'ok' && !x.excluirPendente);
         for (const l of aguardando) {
           const arqs = await Banco.porIndice('arquivos', 'lancamentoId', l.id);
+          const nota = l.origem === 'foto';
           const audio = arqs.find(a => a.tipo === 'audio');
           if (audio && !audio.enviado) continue;
-          avisar('sincronizando', { manual, visivel, detalhe: 'Interpretando áudio…' });
-          const r = await item(() => Api.chamar('interpretar', { id: l.id }, { tempoMs: 150000 }), resumo, 'interpretação');
+          if (nota && arqs.some(a => a.tipo === 'foto' && !a.remover && !a.enviado)) continue; // espera todas as fotos da nota
+          avisar('sincronizando', { manual, visivel, detalhe: nota ? 'Lendo a nota…' : 'Interpretando áudio…' });
+          const r = await item(() => Api.chamar('interpretar', { id: l.id }, { tempoMs: 150000 }), resumo, nota ? 'leitura da nota' : 'interpretação');
           if (!r) continue;
           if (r.lancamento) {
             const res = await aplicarDoServidor(r.lancamento);
-            if (res === 'interpretado') resumo.interpretados++;
+            if (res === 'interpretado') { resumo.interpretados++; if (nota) resumo.notas++; }
           }
           if (r.aviso === 'limite') { resumo.limite = true; break; }
           if (r.aviso === 'config') { resumo.iaIndisponivel = r.mensagem || 'IA indisponível'; break; }
@@ -269,7 +279,7 @@ const Sync = (() => {
       await aplicarPerfilServidor(r);
       for (const s of r.lancamentos || []) {
         const res = await aplicarDoServidor(s);
-        if (res === 'interpretado') resumo.interpretados++;
+        if (res === 'interpretado') { resumo.interpretados++; if (s.origem === 'foto') resumo.notas++; }
         if (res === 'novo') resumo.novos++;
       }
       await Banco.gravarConfig('desde', r.agora);

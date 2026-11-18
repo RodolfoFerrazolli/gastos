@@ -3,7 +3,7 @@
 // =====================================================================
 // Versão do app (fica aqui, e não no config.js, para o config.js de quem já
 // instalou continuar valendo nas atualizações).
-const VERSAO_DO_APP = '1.1.0';
+const VERSAO_DO_APP = '2';
 
 const Api = (() => {
   class ErroRede extends Error {}
@@ -60,7 +60,11 @@ const Api = (() => {
     } catch (e) {
       throw new ErroServidor('resposta_invalida', 'O servidor não respondeu corretamente. Confira o endereço em config.js e se a implantação está com acesso para "Qualquer pessoa".');
     }
-    if (!j.ok) throw new ErroServidor(j.erro || 'erro', j.mensagem || 'Erro no servidor.');
+    if (!j.ok) {
+      const erro = new ErroServidor(j.erro || 'erro', j.mensagem || 'Erro no servidor.');
+      erro.dados = j; // ex.: contato do organizador em "Esqueci minha senha"
+      throw erro;
+    }
     return j;
   }
 

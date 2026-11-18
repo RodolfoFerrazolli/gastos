@@ -33,11 +33,63 @@
         <input id="bv-senha2" type="password" autocomplete="new-password">
       </div>
       <label class="marcar"><input type="checkbox" id="bv-mostrar"> Mostrar senha</label>
+      <div id="bv-bloco-zap">
+        <label for="bv-zap">WhatsApp com DDD</label>
+        <input id="bv-zap" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="(83) 99999-8888">
+        <small class="dica">Usado só se você esquecer a senha: o organizador manda um código para ele.</small>
+      </div>
       <label for="bv-codigo">Código do grupo</label>
       <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
       <button id="bv-comecar" class="botao primario grande">Criar conta</button>
       <p id="bv-erro" class="erro"></p>
       <p class="dica" id="bv-dica">Guarde o nome e a senha: com eles você entra na sua conta em qualquer celular.</p>
+      <button id="bv-esqueci" class="link-botao oculto" type="button">Esqueci minha senha</button>
+    </div>
+  </section>
+
+  <!-- ============ ESQUECI MINHA SENHA ============ -->
+  <section id="tela-senha" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="es-voltar" aria-label="Voltar">←</button>
+      <div class="topo-titulo">Esqueci minha senha</div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <div id="es-passo1">
+        <p class="dica-grande">Digite o nome da sua conta e toque em <b>Pedir código</b>. O organizador vai mandar um código de 6 números para o seu WhatsApp.</p>
+        <label for="es-nome">Nome e sobrenome</label>
+        <input id="es-nome" autocomplete="username" autocapitalize="words" placeholder="Ex.: Maria Silva">
+        <label for="es-grupo">Código do grupo</label>
+        <input id="es-grupo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+        <button id="es-pedir" class="botao primario grande">Pedir código</button>
+      </div>
+      <div id="es-passo2" class="oculto">
+        <div class="caixa-ia" id="es-info"></div>
+        <label for="es-cod">Código recebido no WhatsApp</label>
+        <input id="es-cod" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="6 números">
+        <label for="es-senha">Senha nova</label>
+        <input id="es-senha" type="password" autocomplete="new-password" placeholder="Mínimo 4 dígitos ou letras">
+        <label for="es-senha2">Repita a senha nova</label>
+        <input id="es-senha2" type="password" autocomplete="new-password">
+        <label class="marcar"><input type="checkbox" id="es-mostrar"> Mostrar senha</label>
+        <button id="es-trocar" class="botao primario grande">Trocar a senha e entrar</button>
+        <button id="es-pedir-de-novo" class="link-botao" type="button">Pedir o código de novo</button>
+      </div>
+      <p id="es-erro" class="erro"></p>
+      <div id="es-org"></div>
+    </div>
+  </section>
+
+  <!-- ============ CADASTRO DO WHATSAPP (contas antigas) ============ -->
+  <section id="tela-whatsapp" class="tela oculto">
+    <div class="boas-vindas">
+      <img src="icones/icone-192.png" alt="" class="logo">
+      <h1>Seu WhatsApp</h1>
+      <p>Cadastre o número do seu WhatsApp. Ele é usado se você esquecer a senha: o organizador manda um código para ele.</p>
+      <label for="zap-numero">WhatsApp com DDD</label>
+      <input id="zap-numero" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="(83) 99999-8888">
+      <button id="zap-salvar" class="botao primario grande">Salvar</button>
+      <p id="zap-erro" class="erro"></p>
     </div>
   </section>
 
@@ -45,7 +97,7 @@
   <section id="tela-inicio" class="tela oculto">
     <header class="topo">
       <div class="topo-textos">
-        <div class="topo-titulo">Controle de Gastos</div>
+        <div class="topo-titulo">Controle de Gastos <span class="versao" id="ini-versao"></span></div>
         <div class="topo-sub" id="ini-nome"></div>
       </div>
       <div class="topo-acoes">
@@ -66,6 +118,7 @@
 
     <div class="acoes-principais">
       <button id="btn-voz" class="botao primario grande">🎤 Lançar por voz</button>
+      <button id="btn-foto" class="botao secundario grande">📷 Lançar por foto</button>
       <button id="btn-texto" class="botao secundario grande">✏️ Lançar por texto</button>
     </div>
 
@@ -89,7 +142,7 @@
       <label for="f-desc">Descrição</label>
       <input id="f-desc" placeholder="Ex.: Almoço no restaurante" autocapitalize="sentences">
 
-      <label>Itens <small>(opcional)</small></label>
+      <label>Itens <small>(opcional: quantidade × preço de cada = valor)</small></label>
       <div id="f-itens"></div>
       <button class="botao pequeno" id="f-add-item" type="button">+ Adicionar item</button>
 
@@ -120,11 +173,9 @@
       <label>Fotos da nota ou comprovante</label>
       <div class="fotos" id="f-fotos"></div>
       <div class="linha-botoes">
-        <label class="botao pequeno arquivo">📷 Tirar foto<input type="file" accept="image/*" capture="environment" id="f-camera"></label>
+        <button class="botao pequeno" type="button" id="f-camera">📷 Tirar foto</button>
         <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="f-galeria"></label>
       </div>
-
-      <div class="gps" id="f-gps"></div>
 
       <div class="rodape-form">
         <button class="botao primario grande" id="form-salvar">Salvar</button>
@@ -152,12 +203,31 @@
       <label>Fotos da nota ou comprovante <small>(opcional)</small></label>
       <div class="fotos" id="voz-fotos"></div>
       <div class="linha-botoes">
-        <label class="botao pequeno arquivo">📷 Tirar foto<input type="file" accept="image/*" capture="environment" id="voz-camera"></label>
+        <button class="botao pequeno" type="button" id="voz-camera">📷 Tirar foto</button>
         <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="voz-galeria"></label>
       </div>
-      <div class="gps" id="voz-gps"></div>
 
       <button class="botao primario grande" id="voz-salvar" disabled>Salvar</button>
+    </div>
+  </section>
+
+  <!-- ============ LANÇAR POR FOTO (nota fiscal) ============ -->
+  <section id="tela-foto" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="foto-voltar" aria-label="Voltar">←</button>
+      <div class="topo-titulo">Lançar por foto</div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <p class="dica-foto">Tire a foto da nota fiscal ou do cupom. O app lê os itens, os valores, o local, a data e a hora.
+        Nota comprida? Tire mais de uma foto, de cima para baixo.</p>
+      <div class="fotos fotos-nota" id="foto-lista"></div>
+      <div id="foto-qr" class="foto-qr"></div>
+      <div class="linha-botoes">
+        <button class="botao pequeno" type="button" id="foto-camera">📷 Tirar foto</button>
+        <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="foto-galeria"></label>
+      </div>
+      <button class="botao primario grande" id="foto-salvar" disabled>Salvar</button>
     </div>
   </section>
 
@@ -169,12 +239,21 @@
       <span></span>
     </header>
     <div class="conteudo">
+      <button class="botao novidades" id="cfg-novidades" type="button">✨ O que há de novo</button>
+
       <label>Sua conta</label>
       <div class="conta-info" id="cfg-conta"></div>
+      <div class="linha-botoes">
+        <button class="botao pequeno" id="cfg-zap" type="button">Alterar WhatsApp</button>
+        <button class="botao pequeno" id="cfg-senha" type="button">Trocar senha</button>
+      </div>
 
       <label for="cfg-codigo">Código do grupo</label>
-      <input id="cfg-codigo" autocapitalize="off">
-      <button class="botao primario" id="cfg-salvar">Salvar código</button>
+      <div class="campo-oculto">
+        <input id="cfg-codigo" class="embacado" autocapitalize="off" autocomplete="off" spellcheck="false" readonly>
+        <button class="olho" id="cfg-olho" type="button" aria-label="Mostrar o código" title="Mostrar o código"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92A11.8 11.8 0 0 0 22.99 12C21.26 7.61 16.99 4.5 12 4.5c-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg></button>
+      </div>
+      <button class="botao primario" id="cfg-salvar" disabled>Salvar código</button>
 
       <h3>Informações</h3>
       <dl class="info" id="cfg-info"></dl>
@@ -185,17 +264,46 @@
       </div>
       <p class="dica">No Wi-Fi o app envia tudo sozinho enquanto estiver aberto. Nos dados móveis, toque nas setas no alto da tela inicial.</p>
 
+      <h3>Câmera</h3>
+      <label class="marcar"><input type="checkbox" id="cfg-camera-sistema"> Usar a câmera do próprio celular</label>
+      <p class="dica">Deixe desmarcado para usar a câmera do app (com lanterna e sem a tela “Repetir / OK”). Marque só se a câmera do app der problema neste celular.</p>
+
       <h3>Outro celular</h3>
       <p class="dica">Para usar o app em outro celular, entre com o mesmo nome e senha. Seus lançamentos aparecem lá também.</p>
       <button class="botao perigo" id="cfg-sair">Sair da conta neste celular</button>
+
+      <h3>Remover o app</h3>
+      <p class="dica">Apaga deste celular tudo o que o app guardou (lançamentos, fotos e áudios). O que já foi enviado continua no servidor: para voltar, abra o link do app e entre com seu nome e senha.</p>
+      <button class="botao perigo" id="cfg-remover">Remover app</button>
+    </div>
+  </section>
+
+  <!-- ============ APP REMOVIDO ============ -->
+  <section id="tela-removido" class="tela oculto">
+    <div class="boas-vindas">
+      <img src="icones/icone-192.png" alt="" class="logo">
+      <h1>App removido</h1>
+      <p>Os dados do app foram apagados deste celular. O que já tinha sido enviado continua guardado no servidor.</p>
+      <div class="caixa-ia passos">
+        <b>Agora tire o ícone da tela do celular:</b>
+        <ol>
+          <li>Toque e segure o ícone <b>Controle de Gastos</b> na tela inicial do celular.</li>
+          <li>Escolha <b>Desinstalar</b> (ou arraste o ícone até <b>Desinstalar</b>/<b>Remover</b>).</li>
+        </ol>
+        <small class="dica">Se o app estava aberto no navegador, é só fechar a aba.</small>
+      </div>
+      <p>Para voltar a usar, abra o link do app no Google Chrome e entre com seu nome e senha.</p>
     </div>
   </section>
 
   <!-- ============ RECORTE DE FOTO ============ -->
   <div id="recorte" class="recorte oculto" role="dialog" aria-label="Recortar a foto">
     <div class="recorte-topo">
-      <div><b id="recorte-titulo">Recortar a foto</b><small>Arraste os cantos ou o meio da seleção</small></div>
-      <button id="recorte-descartar" class="botao pequeno escuro" type="button">Descartar</button>
+      <b id="recorte-titulo">Recortar a foto</b>
+      <div class="recorte-topo-botoes">
+        <button id="recorte-repetir" class="botao pequeno escuro oculto" type="button">↺ Repetir foto</button>
+        <button id="recorte-descartar" class="botao pequeno escuro" type="button">Descartar</button>
+      </div>
     </div>
     <div class="recorte-area" id="recorte-area">
       <canvas id="recorte-canvas"></canvas>
@@ -211,6 +319,23 @@
     </div>
   </div>
 
+  <!-- ============ CÂMERA DO APP ============ -->
+  <div id="camera" class="camera oculto" role="dialog" aria-label="Câmera">
+    <video id="camera-video" playsinline muted autoplay></video>
+    <div class="camera-topo">
+      <button id="camera-fechar" class="camera-botao" type="button" aria-label="Fechar a câmera">✕</button>
+      <b id="camera-titulo">Foto da nota</b>
+      <button id="camera-lanterna" class="camera-botao oculto" type="button" aria-label="Ligar a lanterna" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
+      </button>
+    </div>
+    <div id="camera-msg" class="camera-msg oculto"></div>
+    <div class="camera-baixo">
+      <button id="camera-disparo" class="camera-disparo" type="button" aria-label="Tirar foto"></button>
+    </div>
+  </div>
+  <input type="file" accept="image/*" capture="environment" id="camera-sistema" class="invisivel" tabindex="-1" aria-hidden="true">
+
   <div id="toast" class="toast oculto"></div>
   <div id="dialogo"></div>
 
@@ -219,6 +344,8 @@
   <script src="api.js"></script>
   <script src="gravador.js"></script>
   <script src="fotos.js"></script>
+  <script src="qr.js"></script>
+  <script src="camera.js"></script>
   <script src="recorte.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="app.js"></script>

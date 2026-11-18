@@ -116,9 +116,14 @@ input:focus, select:focus { outline: 2px solid #9fbfdf; border-color: #9fbfdf; }
 .conteudo.centro label { text-align: left; }
 .dica { color: var(--cinza); font-size: 13px; display: block; margin-top: 6px; }
 .erro { color: var(--vermelho); font-size: 14px; min-height: 18px; }
-.item-linha { display: grid; grid-template-columns: 1fr 110px 44px; gap: 6px; margin-bottom: 6px; }
+/* itens: nome na primeira linha; quantidade × preço de cada = valor na segunda */
+.item-linha { display: grid; grid-template-columns: 1fr 44px; gap: 6px; margin-bottom: 8px; padding: 8px; background: #fff; border: 1px solid var(--borda); border-radius: 12px; }
 .item-linha input { min-height: 44px; padding: 10px; }
-.item-linha button { border: 1px solid #ecc9c6; background: #fff; color: var(--vermelho); border-radius: 10px; font-size: 18px; }
+.item-linha > button { border: 1px solid #ecc9c6; background: #fff; color: var(--vermelho); border-radius: 10px; font-size: 18px; }
+.item-calc { grid-column: 1 / -1; display: grid; grid-template-columns: 62px 14px minmax(0, 1fr) 14px minmax(0, 1fr); gap: 4px; align-items: center; }
+.item-calc span { text-align: center; color: var(--cinza); font-weight: 700; }
+.item-calc input { padding: 10px 8px; text-align: right; }
+.item-calc input.i-qtd { text-align: center; }
 .rodape-form { display: flex; flex-direction: column; gap: 12px; margin-top: 26px; }
 
 /* ---------- alertas ---------- */
@@ -192,8 +197,35 @@ h3 { color: var(--azul); margin: 28px 0 8px; }
 .info dd { margin: 0; word-break: break-word; }
 .conta-info { background: #fff; border: 1px solid var(--borda); border-radius: 12px; padding: 12px 14px; }
 .conta-info b { display: block; font-size: 17px; color: var(--azul); }
-.conta-info small { color: var(--cinza); font-size: 13px; }
+.conta-info small { color: var(--cinza); font-size: 13px; display: block; margin-top: 2px; }
 #cfg-sair { margin-top: 4px; }
+#cfg-salvar { margin-top: 12px; }
+.botao.novidades { width: 100%; margin-top: 14px; justify-content: center; font-weight: 700; color: var(--azul); background: #fff8e1; border-color: #f2d98c; }
+.campo-oculto { position: relative; }
+.campo-oculto input { padding-right: 54px; }
+input.embacado { color: transparent; text-shadow: 0 0 9px rgba(30, 45, 65, .8); user-select: none; -webkit-user-select: none; }
+.olho { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 46px; height: 46px; border: none; background: transparent; color: var(--cinza); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.olho svg { width: 26px; height: 26px; }
+.olho:active { background: var(--azul-claro); }
+
+/* ---------- versão, links e dicas ---------- */
+.versao { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 9px; background: rgba(255,255,255,.18); vertical-align: 2px; margin-left: 4px; }
+.link-botao { display: block; margin: 14px auto 0; background: none; border: none; color: var(--azul2); font-weight: 600; text-decoration: underline; font-size: 15px; padding: 10px; cursor: pointer; }
+.dica-grande { color: var(--texto); font-size: 15.5px; line-height: 1.45; }
+.dica-foto { color: var(--cinza); margin: 16px 0 12px; line-height: 1.45; }
+.fotos-nota .foto { width: 104px; height: 140px; }
+.foto-qr { font-size: 14px; margin: 10px 0 4px; color: var(--cinza); }
+.foto-qr.achou { color: var(--verde); font-weight: 600; }
+#foto-salvar { margin-top: 22px; }
+#tela-foto .linha-botoes { display: grid; grid-template-columns: 1fr; }
+#tela-foto .linha-botoes .botao { min-height: 48px; }
+.botao.zap { background: #1f8b4c; border-color: #1f8b4c; color: #fff; text-decoration: none; }
+.alerta-caixa .linha-botoes { margin: 8px 0 0; }
+.alerta-caixa .codigo { font-size: 20px; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+.passos { margin: 16px 0; }
+.passos ol { margin: 8px 0 6px; padding-left: 22px; }
+.passos li { margin: 4px 0; }
+.invisivel { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: -9999px; }
 
 /* ---------- toast e diálogo ---------- */
 .toast {
@@ -205,9 +237,40 @@ h3 { color: var(--azul); margin: 28px 0 8px; }
 .dialogo { background: #fff; border-radius: 16px; padding: 20px; width: min(420px, 100%); }
 .dialogo p { margin: 0 0 18px; font-size: 16px; }
 .dialogo .botoes { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.dialogo h2 { margin: 0 0 12px; font-size: 19px; color: var(--azul); }
+.dialogo label:first-of-type { margin-top: 4px; }
+.dialogo .erro { margin: 8px 0 0; }
+.dialogo .botoes.coluna { flex-direction: column; align-items: stretch; }
+.dialogo.novidades { max-height: 86vh; overflow: auto; }
+.novidades h4 { margin: 16px 0 6px; color: var(--azul); }
+.novidades h4 small { color: var(--cinza); font-weight: 400; }
+.novidades ul { margin: 0 0 6px; padding-left: 20px; }
+.novidades li { margin: 5px 0; line-height: 1.4; }
+.novidades .atual { background: #fff8e1; border-radius: 12px; padding: 2px 12px 8px; }
 
 /* ---------- recorte de foto ---------- */
 body.sem-rolagem { overflow: hidden; }
+.recorte-topo-botoes { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* ---------- câmera do app ---------- */
+.camera { position: fixed; inset: 0; z-index: 220; background: #000; color: #fff; }
+.camera video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.camera.piscar::after { content: ''; position: absolute; inset: 0; background: #fff; opacity: .6; pointer-events: none; }
+.camera-topo { position: absolute; left: 0; right: 0; top: 0; display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px; background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0)); }
+.camera-topo b { font-size: 16px; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+/* com a câmera ou o recorte abertos, o aviso fica acima dos botões de baixo */
+body.sem-rolagem .toast { bottom: calc(132px + env(safe-area-inset-bottom)); }
+.camera-botao { width: 48px; height: 48px; border-radius: 24px; border: none; background: rgba(0,0,0,.45); color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+.camera-botao svg { width: 26px; height: 26px; }
+.camera-botao.ligada { background: #ffd54a; color: #3a2a00; }
+.camera-baixo { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; padding: 18px 0 calc(26px + env(safe-area-inset-bottom)); background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.55)); }
+.camera-disparo { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff; background: rgba(255,255,255,.25); box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+.camera-disparo:active { background: rgba(255,255,255,.7); }
+.camera-disparo:disabled { opacity: .45; }
+.camera-msg { position: absolute; left: 16px; right: 16px; top: 30%; background: #1b2633; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.camera-msg p { margin: 0 0 6px; line-height: 1.4; }
+.camera-msg .botao { width: 100%; justify-content: center; text-align: center; }
 .recorte { position: fixed; inset: 0; z-index: 200; background: #0d141c; color: #fff; display: flex; flex-direction: column; }
 .recorte-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 14px 8px; }
 .recorte-topo b { font-size: 16px; display: block; }

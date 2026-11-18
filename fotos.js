@@ -1,7 +1,8 @@
 // =====================================================================
 //  FOTOS: abre, gira, recorta e reduz no próprio celular antes de guardar
 //  e enviar (lado maior de 1600 px em JPEG: a nota continua legível e o
-//  arquivo fica bem menor, economizando espaço e dados móveis).
+//  arquivo fica bem menor, economizando espaço e dados móveis). As fotos
+//  do "Lançar por foto" ficam maiores (2400 px), para a IA ler a nota.
 // =====================================================================
 const Fotos = (() => {
   const LADO_MAXIMO = 1600;   // foto final
@@ -58,16 +59,16 @@ const Fotos = (() => {
     return c;
   }
 
-  /** Recorta a região (em pixels da tela de trabalho) e reduz para no máximo 1600 px, em JPEG. */
-  async function exportar(origem, sx = 0, sy = 0, sw = origem.width, sh = origem.height) {
-    const escala = Math.min(1, LADO_MAXIMO / Math.max(sw, sh));
+  /** Recorta a região (em pixels da tela de trabalho) e reduz para no máximo 1600 px (ou o lado pedido), em JPEG. */
+  async function exportar(origem, sx = 0, sy = 0, sw = origem.width, sh = origem.height, ladoMaximo = LADO_MAXIMO, qualidade = QUALIDADE) {
+    const escala = Math.min(1, ladoMaximo / Math.max(sw, sh));
     const c = novaTela(sw * escala, sh * escala);
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(origem, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', QUALIDADE));
+    const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', qualidade));
     c.width = c.height = 0;
     if (!blob) throw new Error('Não foi possível processar a foto.');
     return blob;

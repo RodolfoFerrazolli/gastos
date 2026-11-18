@@ -6,8 +6,10 @@ const Banco = (() => {
   const NOME = 'controle-gastos';
   const VERSAO = 1;
   let conexao = null;
+  let desativado = false; // depois de "Remover app" o banco não é criado de novo
 
   function abrir() {
+    if (desativado) return Promise.reject(new Error('O app foi removido deste celular.'));
     if (conexao) return Promise.resolve(conexao);
     return new Promise((ok, falha) => {
       const req = indexedDB.open(NOME, VERSAO);
@@ -37,22 +39,28 @@ const Banco = (() => {
     });
   }
 
+  // depois de "Remover app", leituras voltam vazias e gravações não fazem nada
+  // (algo que ainda estava em andamento não recria o banco nem dá erro)
   async function obter(store, chave) {
+    if (desativado) return undefined;
     const db = await abrir();
     return pedido(db.transaction(store).objectStore(store).get(chave));
   }
 
   async function todos(store) {
+    if (desativado) return [];
     const db = await abrir();
     return pedido(db.transaction(store).objectStore(store).getAll());
   }
 
   async function porIndice(store, indice, valor) {
+    if (desativado) return [];
     const db = await abrir();
     return pedido(db.transaction(store).objectStore(store).index(indice).getAll(valor));
   }
 
   async function escrever(store, fn) {
+    if (desativado) return;
     const db = await abrir();
     return new Promise((ok, falha) => {
       const t = db.transaction(store, 'readwrite');
@@ -73,7 +81,27 @@ const Banco = (() => {
   }
   const gravarConfig = (chave, valor) => gravar('config', { chave, valor });
 
-  return { abrir, obter, todos, porIndice, gravar, apagar, limpar, lerConfig, gravarConfig };
+  /** "Remover app": fecha e apaga o banco inteiro deste celular. */
+  function apagarTudo() {
+    desativado = true;
+    if (conexao) { try { conexao.close(); } catch (e) { /* já fechado */ } conexao = null; }
+    if (typeof Perfil !== 'undefined') Perfil._cache = null;
+    return new Promise((ok) => {
+      let feito = false;
+      const fim = () => { if (!feito) { feito = true; ok(); } };
+      try {
+        const r = indexedDB.deleteDatabase(NOME);
+        r.onsuccess = fim;
+        r.onerror = fim;
+        r.onblocked = () => setTimeout(fim, 1500);
+      } catch (e) {
+        fim();
+      }
+      setTimeout(fim, 5000);
+    });
+  }
+
+  return { abrir, obter, todos, porIndice, gravar, apagar, limpar, lerConfig, gravarConfig, apagarTudo };
 })();
 
 // Perfil deste aparelho: identificador do aparelho, código do grupo e a conta

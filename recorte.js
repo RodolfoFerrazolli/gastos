@@ -2,13 +2,15 @@
 //  RECORTE DE FOTO: depois de tirar ou escolher a foto, a pessoa ajusta
 //  a área (arrastando os cantos ou o meio), pode girar, e escolhe
 //  "Usar foto". O recorte é feito na foto em alta resolução e só depois
-//  ela é reduzida (Fotos.exportar).
+//  ela é reduzida (Fotos.exportar). Foto tirada pela câmera do app tem
+//  também o botão "Repetir foto". Nas notas fiscais, procura o QR Code
+//  enquanto a pessoa ajusta o recorte.
 // =====================================================================
 const Recorte = (() => {
   const MIN = 48;     // tamanho mínimo da seleção, em pixels da tela
   const MARGEM = 18;  // espaço em volta da foto (para os cantos não ficarem cortados)
   const $ = (id) => document.getElementById(id);
-  let estado = null;  // { img, sel: {x0,y0,x1,y1} em frações da foto, dw, dh, ox, oy, resolver }
+  let estado = null;  // { img, sel: {x0,y0,x1,y1} em frações da foto, dw, dh, ox, oy, resolver, qr, ladoMaximo, qualidade }
   let arrasto = null;
 
   const limitar = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -105,16 +107,20 @@ const Recorte = (() => {
   }
 
   /**
-   * Mostra a tela de recorte. Devolve a foto pronta (Blob JPEG) ou null se a
-   * pessoa descartar. Dá erro se o formato da imagem não for suportado.
+   * Mostra a tela de recorte. Devolve {acao:'usar', blob, qr} (foto pronta, em JPEG, e o QR Code da nota, se pedido),
+   * {acao:'repetir'} (tirar a foto de novo), {acao:'descartar'} ou {acao:'voltar'} ("voltar" do Android).
+   * Dá erro se o formato da imagem não for suportado.
    */
-  async function abrir(arquivo, { titulo = '' } = {}) {
-    if (estado) fechar(null);
+  async function abrir(arquivo, { titulo = '', repetir = false, lerQr = false, ladoMaximo, qualidade } = {}) {
+    if (estado) fechar({ acao: 'voltar' });
     const img = await Fotos.carregar(arquivo);
+    const qr = lerQr && typeof Qr !== 'undefined' ? Qr.ler(img).catch(() => null) : null;
     return new Promise((resolver, rejeitar) => {
-      estado = { img, sel: selInteira(), resolver, rejeitar, dw: 1, dh: 1, ox: 0, oy: 0 };
+      estado = { img, sel: selInteira(), resolver, rejeitar, dw: 1, dh: 1, ox: 0, oy: 0, qr, ladoMaximo, qualidade };
       $('recorte-titulo').textContent = titulo || 'Recortar a foto';
+      $('recorte-repetir').classList.toggle('oculto', !repetir);
       $('recorte-usar').disabled = false;
+      $('recorte-usar').textContent = 'Usar foto';
       $('recorte').classList.remove('oculto');
       document.body.classList.add('sem-rolagem');
       requestAnimationFrame(desenhar);
@@ -129,7 +135,8 @@ const Recorte = (() => {
     area.addEventListener('pointercancel', aoSoltar);
     window.addEventListener('resize', () => { if (estado) requestAnimationFrame(desenhar); });
 
-    $('recorte-descartar').onclick = () => fechar(null);
+    $('recorte-descartar').onclick = () => fechar({ acao: 'descartar' });
+    $('recorte-repetir').onclick = () => fechar({ acao: 'repetir' });
     $('recorte-inteira').onclick = () => { if (!estado) return; estado.sel = selInteira(); posicionarCaixa(); };
     $('recorte-girar').onclick = () => {
       if (!estado) return;
@@ -148,7 +155,13 @@ const Recorte = (() => {
       const sh = Math.max(1, Math.round((sel.y1 - sel.y0) * img.height));
       $('recorte-usar').disabled = true;
       try {
-        fechar(await Fotos.exportar(img, sx, sy, Math.min(sw, img.width - sx), Math.min(sh, img.height - sy)));
+        const blob = await Fotos.exportar(img, sx, sy, Math.min(sw, img.width - sx), Math.min(sh, img.height - sy), estado.ladoMaximo, estado.qualidade);
+        let qr = null;
+        if (estado && estado.qr) {
+          $('recorte-usar').textContent = 'Procurando o QR Code…';
+          qr = await Promise.race([estado.qr, new Promise(ok => setTimeout(() => ok(null), 8000))]);
+        }
+        fechar({ acao: 'usar', blob, qr });
       } catch (e) {
         fechar(null, e);
       }
@@ -156,6 +169,6 @@ const Recorte = (() => {
   }
 
   iniciar();
-  // cancelar(): usado pelo "voltar" do Android; devolve undefined (a pessoa desistiu de todas as fotos escolhidas)
-  return { abrir, aberto: () => !!estado, cancelar: () => fechar(undefined) };
+  // cancelar(): usado pelo "voltar" do Android (a pessoa desistiu de todas as fotos escolhidas)
+  return { abrir, aberto: () => !!estado, cancelar: () => fechar({ acao: 'voltar' }) };
 })();
