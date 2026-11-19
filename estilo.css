@@ -143,11 +143,12 @@ input:focus, select:focus { outline: 2px solid #9fbfdf; border-color: #9fbfdf; }
 .alerta-caixa.coluna { flex-direction: column; align-items: stretch; }
 
 /* ---------- início ---------- */
-.totais { display: flex; gap: 10px; padding: 0 14px; margin-top: 14px; }
+/* totais como etiquetas, sem caixa (V5) */
+.totais { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 0 16px; margin-top: 12px; }
 .totais:empty { display: none; }
-.totais div { flex: 1; background: #fff; border: 1px solid var(--borda); border-radius: 12px; padding: 10px 12px; }
-.totais small { display: block; color: var(--cinza); font-size: 12.5px; }
-.totais b { font-size: 18px; color: var(--azul); }
+.totais div { display: flex; align-items: baseline; gap: 6px; }
+.totais small { color: var(--cinza); font-size: 13px; font-weight: 600; }
+.totais b { font-size: 17px; color: var(--azul); font-variant-numeric: tabular-nums; }
 .dia { font-size: 13px; font-weight: 700; color: var(--cinza); text-transform: uppercase; letter-spacing: .03em; margin: 18px 16px 6px; }
 .cartao {
   display: flex; gap: 10px; align-items: flex-start; justify-content: space-between;
@@ -382,3 +383,73 @@ input:disabled { background: #eef1f4; color: var(--cinza); }
 .caixa-ia ul { margin: 6px 0 0; padding-left: 20px; }
 .botoes-leitura { margin-top: 6px; }
 .botoes-leitura .botao { font-size: 15px; padding: 10px 6px; white-space: nowrap; }
+
+/* ---------- V5 ---------- */
+.texto-laranja { color: var(--laranja); }
+/* nome do botão ao tocar e segurar (engrenagem e "+") */
+.dica-flutuante {
+  position: fixed; z-index: 95; background: #fff; color: var(--azul); font-size: 13px; font-weight: 700;
+  padding: 6px 12px; border-radius: 10px; white-space: nowrap; box-shadow: 0 3px 12px rgba(0,0,0,.25); pointer-events: none;
+}
+.dica-flutuante::after { content: ''; position: absolute; left: calc(var(--seta, 50%) - 6px); border: 6px solid transparent; }
+.dica-flutuante.abaixo::after { top: -6px; border-top: 0; border-bottom-color: #fff; }
+.dica-flutuante.acima::after { bottom: -6px; border-bottom: 0; border-top-color: #fff; }
+/* campo que falta preencher (cor do veículo de antes da V5) */
+input.falta { border-color: #e0a35a; background: #fff8ee; }
+/* abastecimento: valor do litro, litros e valor total */
+.tres-colunas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tres-colunas label { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tres-colunas input { padding: 12px 8px; }
+input.calculado { background: var(--azul-claro); color: var(--azul2); font-style: italic; border-style: dashed; }
+.tres-info { margin-top: 6px; font-size: 13px; color: var(--cinza); min-height: 18px; }
+.aviso-botao { background: none; border: none; padding: 0; font: inherit; color: var(--laranja); font-weight: 700; cursor: pointer; text-align: left; }
+.aviso-valores { font-size: 14px; padding: 4px 0; text-decoration: underline; }
+.cartao .aviso-botao { font-size: 13px; text-decoration: underline dotted; padding: 2px 0; }
+/* campo com × no fim (Local) */
+.campo-com-x { position: relative; }
+.campo-com-x input { padding-right: 46px; }
+.limpar-campo {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: none;
+  background: none; color: var(--cinza); font-size: 26px; line-height: 1; cursor: pointer; border-radius: 50%;
+}
+.limpar-campo:active { background: var(--azul-claro); }
+/* datas dos veículos: o botão abre o calendário do app */
+.campo-data {
+  display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; border: 1px solid var(--borda);
+  background: #fff; border-radius: 12px; padding: 12px; min-height: 48px; font-size: 16px; cursor: pointer; color: var(--texto);
+}
+.campo-data::after { content: '📅'; font-size: 17px; }
+.campo-data.vazio { color: var(--cinza); }
+.campo-data:disabled { background: #eef1f4; color: var(--cinza); }
+.dialogo.calendario { padding: 16px; width: min(360px, 100%); }
+.cal-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--borda); }
+.cal-titulo { min-width: 0; }
+.cal-titulo small { display: block; color: var(--cinza); font-size: 13px; }
+.cal-titulo b { font-size: 20px; color: var(--azul); }
+.cal-modo { width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--borda); background: #fff; font-size: 20px; cursor: pointer; flex-shrink: 0; }
+.cal-mes { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 4px; }
+.cal-mes b { color: var(--azul); }
+.cal-seta { width: 44px; height: 44px; border: none; background: none; font-size: 28px; line-height: 1; color: var(--azul2); border-radius: 50%; cursor: pointer; }
+.cal-seta:disabled { opacity: .3; }
+.cal-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.cal-sem { font-size: 12px; font-weight: 700; color: var(--cinza); padding: 4px 0; }
+.cal-dia { aspect-ratio: 1; min-height: 38px; border: none; background: none; border-radius: 50%; font-size: 15px; cursor: pointer; color: var(--texto); padding: 0; }
+.cal-dia.hoje { color: var(--azul2); font-weight: 700; box-shadow: inset 0 0 0 1px var(--azul2); }
+.cal-dia.escolhido { background: var(--azul2); color: #fff; font-weight: 700; }
+.cal-botoes { margin-top: 8px; align-items: center; }
+.cal-espaco { flex: 1; }
+.calendario #cal-corpo label { margin-top: 14px; }
+.calendario .erro { min-height: 0; }
+/* compartilhar veículo */
+.pessoa {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #fff;
+  border: 1px solid var(--borda); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+}
+.pessoa-nome { min-width: 0; }
+.pessoa-nome small { display: block; color: var(--cinza); font-size: 12.5px; margin-top: 2px; }
+.pessoa-nome small.texto-laranja { color: var(--laranja); }
+.aviso-pendente .linha-botoes { margin-top: 10px; }
+/* gasto lançado por outra pessoa num veículo compartilhado */
+.nota-autor { background: var(--azul-claro); border: 1px solid #d3e0ec; border-radius: 12px; padding: 10px 12px; margin-top: 12px; font-size: 14px; color: var(--azul); }
+.somente-leitura select:disabled, .somente-leitura textarea:disabled { background: #eef1f4; color: var(--cinza); }
+.somente-leitura [data-remover] { display: none; }

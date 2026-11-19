@@ -10,6 +10,10 @@
 //  - V4: os veículos e os gastos de cada um seguem as mesmas regras. O
 //    áudio e a nota do posto de um abastecimento são lidos pela IA a
 //    pedido do celular (no Wi-Fi sozinho; nos dados móveis pelas setas).
+//  - V5: veículos compartilhados. O celular diz ao servidor quais
+//    veículos já tem; o servidor responde quais a conta enxerga (os dela
+//    e os compartilhados com ela). O compartilhado que sumiu dessa lista
+//    (a pessoa saiu, o dono tirou ou excluiu) sai do celular.
 // =====================================================================
 const Sync = (() => {
   let rodando = false;
@@ -19,12 +23,14 @@ const Sync = (() => {
     'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm', 'qrNota', 'fotosNota'];
   // Campos que só o servidor preenche
   const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'];
-  // Veículos (V4)
-  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'alteradoEm'];
+  // Veículos (V4; a cor entrou na V5)
+  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'alteradoEm'];
+  // do veículo, só o servidor sabe: se é da conta ("meu") ou compartilhado com ela, e quem é o dono (V5)
+  const CAMPOS_VEICULO_SERVIDOR = ['meu', 'dono'];
   const CAMPOS_REGISTRO = ['veiculoId', 'tipo', 'data', 'valor', 'formaPagamento', 'descricao', 'hodometro', 'combustivel',
     'tanqueCheio', 'precoLitro', 'litros', 'seguradora', 'apolice', 'validade', 'local', 'lat', 'lng', 'status', 'fonte',
     'qrNota', 'observacao', 'alteradoEm'];
-  const CAMPOS_REGISTRO_SERVIDOR = ['qtdFotos', 'participante'];
+  const CAMPOS_REGISTRO_SERVIDOR = ['qtdFotos', 'participante', 'alteradoPor', 'meu'];
 
   function conexao() {
     if (!navigator.onLine) return 'offline';
@@ -177,10 +183,12 @@ const Sync = (() => {
   function veiculoParaServidor(v) {
     const o = { id: v.id, criadoEm: v.criadoEm, versaoBase: v.versaoBase || 0 };
     CAMPOS_VEICULO.forEach(k => { o[k] = v[k] === undefined ? null : v[k]; });
+    if (!o.cor) delete o.cor; // veículo de antes da V5, ainda sem cor: o servidor guarda a que já tem
     return o;
   }
   function copiarVeiculo(local, s) {
     CAMPOS_VEICULO.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
+    CAMPOS_VEICULO_SERVIDOR.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
     local.versaoBase = s.versao || local.versaoBase || 0;
   }
   async function aplicarRespostaVeiculo(enviado, s, aviso) {
@@ -193,6 +201,7 @@ const Sync = (() => {
       else local.versaoBase = s.versao;
     } else {
       local.versaoBase = s.versao;
+      CAMPOS_VEICULO_SERVIDOR.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
       if (!editadoDuranteEnvio) local.sync = 'ok';
     }
     await Banco.gravar('veiculos', local);
@@ -204,20 +213,39 @@ const Sync = (() => {
       const novo = { id: s.id, criadoEm: s.criadoEm || Date.now(), sync: 'ok', tentouEnviar: true };
       copiarVeiculo(novo, s);
       await Banco.gravar('veiculos', novo);
-      return 'novo';
+      return s.meu === false ? 'compartilhado' : 'novo';
     }
     if (s.excluido) { await apagarVeiculoLocal(s.id); return 'excluido'; }
     if (local.excluirPendente) return 'ok';
     if (local.sync === 'pendente') {
       const servidorMaisNovo = (s.versao || 0) > (local.versaoBase || 0) && (s.alteradoEm || 0) > (local.alteradoEm || 0);
-      if (!servidorMaisNovo) return 'ok';
-      copiarVeiculo(local, s);
-      local.sync = 'ok';
+      CAMPOS_VEICULO_SERVIDOR.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
+      if (servidorMaisNovo) {
+        copiarVeiculo(local, s);
+        local.sync = 'ok';
+      }
     } else if ((s.versao || 0) >= (local.versaoBase || 0)) {
       copiarVeiculo(local, s);
+    } else {
+      CAMPOS_VEICULO_SERVIDOR.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
     }
     await Banco.gravar('veiculos', local);
     return 'ok';
+  }
+
+  /**
+   * V5: o servidor diz quais veículos a conta enxerga. Um compartilhado que não está mais na lista
+   * (a pessoa saiu, o dono tirou ou excluiu o veículo, ou ficou pendente) sai do celular com os gastos dele.
+   * Os veículos da própria conta nunca saem por aqui (a exclusão deles chega como "excluido").
+   */
+  async function aplicarAcessiveis(acessiveis, resumo) {
+    if (!Array.isArray(acessiveis)) return; // servidor de antes da V5
+    const pode = new Set(acessiveis.map(String));
+    for (const v of await Banco.todos('veiculos')) {
+      if (v.meu !== false || !v.versaoBase || pode.has(v.id)) continue;
+      await apagarVeiculoLocal(v.id);
+      if (!v.excluirPendente) resumo.descompartilhados.push(`O ${v.modelo} (${v.placa}) não está mais compartilhado com você.`);
+    }
   }
 
   function registroParaServidor(r) {
@@ -326,12 +354,38 @@ const Sync = (() => {
     usar('valor', c.valorTotal);
     usar('formaPagamento', c.formaPagamento);
     usar('data', c.data);
+    usar('litros', c.litros);
     if (c.local && livre('local')) { reg.local = c.local; auto.delete('local'); reg.localPendente = false; }
     if (c.tanqueCheio === true && !reg.tanqueCheio && auto.has('tanqueCheio')) { reg.tanqueCheio = true; auto.delete('tanqueCheio'); }
-    if (reg.valor != null && reg.precoLitro > 0) reg.litros = Math.round(reg.valor / reg.precoLitro * 1000) / 1000;
-    else if (c.litros != null && reg.litros == null) reg.litros = c.litros;
+    // valor do litro × litros = valor total: com dois informados, o terceiro é calculado (V5)
+    const T = ['precoLitro', 'litros', 'valor'];
+    const tem = (k) => Number(reg[k]) > 0;
+    let base = T.filter(k => tem(k) && !auto.has(k));
+    if (base.length < 2 && tem('precoLitro') && auto.has('precoLitro') && reg.calculado !== 'precoLitro') base = base.concat('precoLitro'); // o último preço pago
+    if (base.length === 2) {
+      const falta = T.find(k => !base.includes(k));
+      reg[falta] = calcularTerceiro(falta, reg);
+      reg.calculado = reg[falta] != null ? falta : '';
+      auto.add(falta);
+    } else if (base.length < 2 && reg.calculado && auto.has(reg.calculado)) {
+      reg[reg.calculado] = null;
+      reg.calculado = '';
+    } else if (base.length === 3) {
+      reg.calculado = '';
+    }
     reg.automaticos = Array.from(auto);
     return reg;
+  }
+
+  /** O valor que falta no abastecimento: total = litro × litros; litros = total ÷ litro; litro = total ÷ litros. */
+  function calcularTerceiro(falta, v) {
+    const p = Number(v.precoLitro);
+    const l = Number(v.litros);
+    const t = Number(v.valor);
+    if (falta === 'valor') return p > 0 && l > 0 ? Math.round(p * l * 100) / 100 : null;
+    if (falta === 'litros') return p > 0 && t > 0 ? Math.round(t / p * 1000) / 1000 : null;
+    if (falta === 'precoLitro') return l > 0 && t > 0 ? Math.round(t / l * 1000) / 1000 : null;
+    return null;
   }
 
   /**
@@ -397,7 +451,7 @@ const Sync = (() => {
       let mudou = false;
       if (r.nome && r.nome !== perfil.nome) { perfil.nome = r.nome; mudou = true; } // o organizador pode ter corrigido o nome
       // WhatsApp da conta e se ela é a do organizador (servidor V2)
-      ['whatsapp', 'precisaWhatsapp', 'organizador'].forEach((k) => {
+      ['whatsapp', 'precisaWhatsapp', 'organizador', 'email', 'precisaEmail'].forEach((k) => {
         if (r[k] !== undefined && r[k] !== perfil[k]) { perfil[k] = r[k]; mudou = true; }
       });
       // servidor da versão 1.1 (ainda não atualizado): não sabe ler notas por foto
@@ -444,7 +498,8 @@ const Sync = (() => {
     const primeiraVez = !(await Banco.lerConfig('desde', 0)); // logo depois de entrar na conta: traz o histórico
     const visivel = manual || primeiraVez || (!somenteBaixar && (await pendentes()) > 0);
     avisar('sincronizando', { manual, visivel });
-    const resumo = { enviados: 0, arquivos: 0, interpretados: 0, notas: 0, veiculosLidos: 0, novos: 0, limite: false, iaIndisponivel: '', erros: [] };
+    const resumo = { enviados: 0, arquivos: 0, interpretados: 0, notas: 0, veiculosLidos: 0, novos: 0, limite: false, iaIndisponivel: '', erros: [],
+      compartilhados: [], descompartilhados: [] };
     try {
       if (!somenteBaixar) {
         // 1) exclusões feitas no aparelho
@@ -618,8 +673,10 @@ const Sync = (() => {
       // 6) novidades do servidor (histórico da conta, outros celulares, IA, administrador, endereços, listas)
       const desde = (await Banco.lerConfig('desde', 0)) || 0;
       avisar('sincronizando', { manual, visivel, detalhe: desde ? 'Buscando novidades…' : 'Buscando seus lançamentos…' });
-      // o endereço do app vai junto: o painel do organizador monta o link de convite com ele
-      const r = await Api.chamar('atualizacoes', { desde, urlApp: location.origin + location.pathname }, { tempoMs: 60000 });
+      // o endereço do app vai junto: o painel do organizador monta o link de convite com ele;
+      // V5: os veículos que o celular já tem (o que for novo para ele, ex.: acabou de ser compartilhado, vem com todos os gastos)
+      const conhecidos = (await Banco.todos('veiculos')).filter(v => v.versaoBase > 0).map(v => v.id);
+      const r = await Api.chamar('atualizacoes', { desde, urlApp: location.origin + location.pathname, conhecidos }, { tempoMs: 60000 });
       await aplicarPerfilServidor(r);
       for (const s of r.lancamentos || []) {
         const res = await aplicarDoServidor(s);
@@ -627,11 +684,20 @@ const Sync = (() => {
         if (res === 'novo') resumo.novos++;
       }
       // veículos e gastos dos veículos (V4): primeiro os veículos, depois os gastos
-      for (const s of r.veiculos || []) await aplicarVeiculoDoServidor(s);
+      for (const s of r.veiculos || []) {
+        const res = await aplicarVeiculoDoServidor(s);
+        if (res === 'compartilhado') resumo.compartilhados.push(`👥 ${primeiroNome(s.dono) || 'Alguém'} compartilhou o ${s.modelo} com você.`);
+      }
+      await aplicarAcessiveis(r.acessiveis, resumo);
+      const veiculosAqui = new Set((await Banco.todos('veiculos')).map(v => v.id));
       for (const s of r.registros || []) {
+        if (!veiculosAqui.has(s.veiculoId)) continue; // gasto de um veículo que não está neste celular
         const res = await aplicarRegistroDoServidor(s);
         if (res === 'interpretado') resumo.veiculosLidos++;
       }
+      // compartilhamentos (V5): com quem cada veículo da conta está compartilhado e os pendentes com ela
+      if (r.compartilhamentos !== undefined) await Banco.gravarConfig('compartilhamentos', r.compartilhamentos || {});
+      if (r.compartilhamentosPendentes !== undefined) await Banco.gravarConfig('compartilhamentosPendentes', r.compartilhamentosPendentes || []);
       await Banco.gravarConfig('desde', r.agora);
       await Banco.gravarConfig('ultimaSync', Date.now());
       await Banco.gravarConfig('ultimoErro', null);
@@ -661,8 +727,10 @@ const Sync = (() => {
     }
   }
 
+  function primeiroNome(n) { return String(n || '').trim().split(/\s+/)[0]; }
+
   return {
-    sincronizar, conexao, pendentes, apagarLocal, apagarVeiculoLocal, estaRodando: () => rodando,
+    sincronizar, conexao, pendentes, apagarLocal, apagarVeiculoLocal, estaRodando: () => rodando, calcularTerceiro,
     // usados pelo formulário do abastecimento ("Lançar por voz" e "Ler nota do posto" na hora)
     lerNotaPosto, blobParaBase64, avisosDaLeitura
   };

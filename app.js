@@ -23,6 +23,17 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 5', itens: [
+      '👥 <b>Compartilhar veículo:</b> na tela do veículo, a engrenagem ⚙️ tem <b>Editar veículo</b> e <b>Compartilhar veículo</b>. Você informa o primeiro nome e o e-mail da pessoa e o veículo aparece na lista dela, com 👥. Ela vê tudo e lança gastos, mas só altera ou exclui o que ela mesma lançou. Você, que é o dono, pode tudo e tira a pessoa quando quiser. O extrato mostra quem lançou cada gasto.',
+      '📧 <b>E-mail:</b> toda conta agora tem um e-mail (cada e-mail só pode estar em uma conta). Quem já tinha conta cadastra pelo aviso que aparece ao abrir o app ou nas Configurações.',
+      '🎨 <b>Cor do veículo:</b> agora é obrigatória. Veículo sem cor mostra um aviso até você completar o cadastro.',
+      '⛽ <b>Abastecimento:</b> valor do litro, litros e valor total. Com dois deles, o app calcula o terceiro. Se você digitar os três e eles não baterem, aparece ⚠️ (toque nele para ver o porquê). O próximo abastecimento já vem com o combustível, o valor do litro e a forma de pagamento do último daquele veículo.',
+      '📅 <b>Datas dos veículos:</b> calendário novo. No ✏️ você digita a data num campo vazio (dd/mm/aaaa).',
+      '✖️ O campo <b>Local</b> tem um × no fim para apagar tudo de uma vez.',
+      '💰 Os totais viraram etiquetas: no veículo fica só o <b>Total</b>; na tela inicial, <b>Hoje</b> e <b>Total lançado</b>.',
+      '👆 <b>Tocar e segurar:</b> nas setas, a situação aparece por 3 segundos; na engrenagem aparece “Configurações” e no + aparece “Adicionar um item”.',
+      '➕ Com o menu do + aberto, arrastar a tela fecha o menu.'
+    ] },
     { titulo: 'Versão 4', itens: [
       '➕ <b>Botão +</b> no meio da parte de baixo da tela inicial: ele abre o <b>Lançar por voz</b>, o <b>Lançar por foto</b>, o <b>Lançar por texto</b> e o novo <b>Veículos</b>. O histórico fica logo abaixo do título.',
       '🚗 <b>Veículos:</b> cadastre seus veículos (montadora, modelo, ano e placa) e lance os gastos de cada um: <b>abastecimento</b>, <b>manutenção</b>, <b>despesas</b> (seguro, IPVA, licenciamento, multas e outros) e uma <b>galeria</b> de fotos. Cada veículo tem o extrato dele, do mais novo para o mais velho, com o total. Esses gastos não entram no histórico da tela inicial.',
@@ -121,6 +132,11 @@
     if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
     if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
     return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  }
+  // E-mail (V5): minúsculas e sem espaços; '' se não parecer um e-mail
+  function normalizarEmail(v) {
+    const e = String(v || '').trim().toLowerCase();
+    return e.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e) ? e : '';
   }
   function mascaraZap(input) {
     input.addEventListener('input', () => {
@@ -309,8 +325,23 @@
       $('dialogo').querySelectorAll('[data-opcao]').forEach((b) => {
         b.onclick = () => { fecharDialogo(); ok(opcoes[Number(b.dataset.opcao)].valor); };
       });
-      $('mm-fechar').onclick = () => { fecharDialogo(); ok(null); };
-      $('mm-fundo').addEventListener('click', (e) => { if (e.target === e.currentTarget) { fecharDialogo(); ok(null); } });
+      const fundo = $('mm-fundo');
+      const fechar = () => { if ($('mm-fundo') === fundo) { fecharDialogo(); ok(null); } };
+      $('mm-fechar').onclick = fechar;
+      fundo.addEventListener('click', (e) => { if (e.target === e.currentTarget) fechar(); });
+      // arrastar a tela (a lista que está atrás do menu) também fecha o menu (V5)
+      let inicio = null;
+      fundo.addEventListener('pointerdown', (e) => { inicio = e.target === e.currentTarget ? { x: e.clientX, y: e.clientY } : null; });
+      fundo.addEventListener('pointermove', (e) => { if (inicio && Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) > 12) fechar(); });
+      fundo.addEventListener('pointerup', () => { setTimeout(() => { inicio = null; }, 0); });
+      fundo.addEventListener('pointercancel', () => { if (inicio) fechar(); }); // o navegador começou a rolar a tela
+      fundo.addEventListener('touchmove', (e) => { if (e.target === e.currentTarget) fechar(); }, { passive: true });
+      fundo.addEventListener('wheel', fechar, { passive: true });
+      const aoRolar = (e) => {
+        if ($('mm-fundo') !== fundo) { document.removeEventListener('scroll', aoRolar, true); return; } // o menu já fechou
+        if (!(e.target instanceof Node) || !fundo.contains(e.target)) fechar();
+      };
+      document.addEventListener('scroll', aoRolar, { capture: true, passive: true });
     });
   }
   function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
@@ -504,6 +535,7 @@
     $('bv-aba-entrar').setAttribute('aria-selected', String(!criar));
     $('bv-bloco-confirma').classList.toggle('oculto', !criar);
     $('bv-bloco-zap').classList.toggle('oculto', !criar);
+    $('bv-bloco-email').classList.toggle('oculto', !criar);
     $('bv-esqueci').classList.toggle('oculto', criar);
     $('bv-senha').setAttribute('autocomplete', criar ? 'new-password' : 'current-password');
     $('bv-senha').placeholder = criar ? 'Mínimo 4 dígitos ou letras' : 'Sua senha';
@@ -570,6 +602,7 @@
     $('bv-senha').value = '';
     $('bv-senha2').value = '';
     $('bv-zap').value = '';
+    $('bv-email').value = '';
     $('bv-mostrar').checked = false;
     $('bv-senha').type = 'password';
     $('bv-senha2').type = 'password';
@@ -600,6 +633,8 @@
     if (senha.length < 4) return erro(criar ? 'A senha precisa ter pelo menos 4 caracteres.' : 'Digite sua senha.');
     if (criar && senha !== $('bv-senha2').value) return erro('As duas senhas não estão iguais.');
     if (criar && !zapValido($('bv-zap').value)) return erro('Informe seu WhatsApp com DDD (ex.: (83) 99999-8888).');
+    const email = normalizarEmail($('bv-email').value);
+    if (criar && !email) return erro('Informe seu e-mail (ex.: nome@gmail.com).');
     if (!codigo) {
       mostrarCampoCodigo('bv-bloco-codigo', 'bv-codigo', true);
       return erro('Informe o código do grupo. Ele vem no link do app que o organizador mandou.');
@@ -615,7 +650,7 @@
     botao.textContent = criar ? 'Criando a conta…' : 'Entrando…';
     try {
       const dados = { nome, senha, aparelho: await Aparelho.info() };
-      if (criar) dados.whatsapp = digitosZap($('bv-zap').value);
+      if (criar) { dados.whatsapp = digitosZap($('bv-zap').value); dados.email = email; }
       const r = await Api.chamar(criar ? 'criarConta' : 'entrar', dados, { perfil: temp, tempoMs: 30000 });
       await concluirEntrada(r, anterior, temp);
     } catch (e) {
@@ -656,6 +691,7 @@
       aparelhoId: temp.aparelhoId, codigo: temp.codigo, token: r.token, contaId: r.conta.id, nome: r.conta.nome,
       criadoEm: (anterior && anterior.criadoEm) || Date.now(), entrouEm: Date.now(),
       whatsapp: r.whatsapp || '', precisaWhatsapp: !!r.precisaWhatsapp, organizador: !!r.organizador,
+      email: r.email || '', precisaEmail: r.precisaEmail === true, // servidor de antes da V5 não manda: sem aviso
       servidorAntigo: r.precisaWhatsapp === undefined
     });
     await Banco.gravarConfig('versaoVista', VERSAO_DO_APP); // quem acabou de entrar não precisa ver o "O que há de novo"
@@ -669,6 +705,7 @@
     // traz o histórico da conta (no Wi-Fi também envia o que estiver pendente neste celular)
     Sync.sincronizar(Sync.conexao() === 'wifi' ? {} : { somenteBaixar: true });
     if (r.organizador) buscarPedidos(true);
+    talvezPedirEmail();
   }
 
   // ------------------------------------------------------------------
@@ -890,7 +927,7 @@
     const comValor = lancs.filter(l => l.valorTotal != null);
     const totalHoje = comValor.filter(l => chaveDia(l.dataHora) === hoje).reduce((s, l) => s + Number(l.valorTotal), 0);
     const total = comValor.reduce((s, l) => s + Number(l.valorTotal), 0);
-    $('totais').innerHTML = `<div><small>Hoje</small><b>${brl(totalHoje)}</b></div><div><small>Total lançado</small><b>${brl(total)}</b></div>`;
+    $('totais').innerHTML = `<div><small>Hoje</small> <b>${brl(totalHoje)}</b></div><div><small>Total lançado</small> <b>${brl(total)}</b></div>`;
 
     if (!lancs.length) {
       $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar seu primeiro gasto.</div>';
@@ -1044,20 +1081,20 @@
     }
   });
 
-  // Setas de sincronização: tocar sincroniza (se já estão girando, mostra "Sincronizando…" por 5 s);
-  // tocar e segurar mostra a situação atual por 5 s.
+  // Setas de sincronização: tocar sincroniza (se já estão girando, mostra "Sincronizando…" por 3 s);
+  // tocar e segurar mostra a situação atual por 3 s.
   let seguraRelogio = null;
   let segurou = false;
   async function mostrarSituacaoSync() {
-    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 5000); return; }
+    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 3000); return; }
     const n = await Sync.pendentes();
     const ultima = await Banco.lerConfig('ultimaSync', 0);
     const erro = await Banco.lerConfig('ultimoErro', null);
     const falhou = !!(erro && erro.quando && erro.quando >= (ultima || 0));
     const semInternet = Sync.conexao() === 'offline' ? ' · sem internet' : '';
-    if (n > 0) rotulo(plural(n, '1 lançamento para enviar', '# lançamentos para enviar') + semInternet, 'vermelho', 5000);
-    else if (falhou || !ultima) rotulo('Não sincronizado' + semInternet, 'vermelho', 5000);
-    else rotulo('Sincronizado', 'verde', 5000);
+    if (n > 0) rotulo(plural(n, '1 lançamento para enviar', '# lançamentos para enviar') + semInternet, 'vermelho', 3000);
+    else if (falhou || !ultima) rotulo('Não sincronizado' + semInternet, 'vermelho', 3000);
+    else rotulo('Sincronizado', 'verde', 3000);
   }
   $('btn-sync').addEventListener('pointerdown', () => {
     segurou = false;
@@ -1072,7 +1109,7 @@
   });
   $('btn-sync').onclick = () => {
     if (segurou) { segurou = false; return; } // foi "tocar e segurar": só mostra a situação
-    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 5000); return; }
+    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 3000); return; }
     Sync.sincronizar({ manual: true });
   };
   // botão "+": as três formas de lançar e os veículos
@@ -1088,6 +1125,47 @@
     else if (escolha === 'texto') abrirNovoTexto();
     else if (escolha === 'veiculos') Veiculos.abrirLista();
   };
+
+  // Tocar e segurar a engrenagem ou o "+" mostra o nome do botão por 3 s (V5)
+  let dicaRelogio = null;
+  function mostrarDica(botao, texto) {
+    let el = $('dica-flutuante');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'dica-flutuante';
+      el.className = 'dica-flutuante oculto';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = texto;
+    el.classList.remove('oculto', 'acima', 'abaixo');
+    const r = botao.getBoundingClientRect();
+    const acima = r.top > window.innerHeight / 2; // botão lá embaixo (o "+"): a dica fica em cima dele
+    el.classList.add(acima ? 'acima' : 'abaixo');
+    const centro = r.left + r.width / 2;
+    const esquerda = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, centro - el.offsetWidth / 2));
+    el.style.left = esquerda + 'px';
+    el.style.top = (acima ? r.top - el.offsetHeight - 12 : r.bottom + 10) + 'px';
+    el.style.setProperty('--seta', (centro - esquerda) + 'px');
+    clearTimeout(dicaRelogio);
+    dicaRelogio = setTimeout(() => el.classList.add('oculto'), 3000);
+  }
+  function dicaAoSegurar(botao, texto) {
+    if (!botao) return;
+    let relogio = null;
+    let segurou = false;
+    const mostrar = () => { segurou = true; mostrarDica(botao, texto); };
+    botao.addEventListener('pointerdown', () => { segurou = false; clearTimeout(relogio); relogio = setTimeout(mostrar, 500); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => botao.addEventListener(ev, () => clearTimeout(relogio)));
+    // no Android, segurar o dedo também gera este evento: vale como "tocar e segurar"
+    botao.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!segurou) { clearTimeout(relogio); mostrar(); } });
+    // depois de segurar, soltar o dedo não vale como toque no botão
+    botao.addEventListener('click', (e) => { if (segurou) { segurou = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  }
+  dicaAoSegurar($('ini-config'), 'Configurações');
+  dicaAoSegurar($('btn-mais'), 'Adicionar um item');
+  dicaAoSegurar($('vx-mais'), 'Adicionar um item');
+  dicaAoSegurar($('vx-config'), 'Configurações do veículo');
   $('ini-config').onclick = () => abrirConfig();
 
   // ------------------------------------------------------------------
@@ -1682,7 +1760,62 @@
   // ------------------------------------------------------------------
   function renderConta(p) {
     $('cfg-conta').innerHTML = `<b>${esc(p.nome)}</b><small>Conta conectada neste celular</small>` +
-      `<small>WhatsApp: ${p.whatsapp ? esc(formatarZap(p.whatsapp)) : 'não cadastrado'}</small>`;
+      `<small>WhatsApp: ${p.whatsapp ? esc(formatarZap(p.whatsapp)) : 'não cadastrado'}</small>` +
+      `<small>E-mail: ${p.email ? esc(p.email) : '<b class="texto-laranja">não cadastrado</b>'}</small>`;
+    $('cfg-email').textContent = p.email ? 'Alterar e-mail' : 'Cadastrar e-mail';
+  }
+
+  /** E-mail da conta (V5): cada e-mail só pode estar em uma conta; precisa de internet. */
+  function dialogoEmail(p) {
+    return dialogoCampos({
+      titulo: p.email ? 'Alterar e-mail' : 'Cadastrar e-mail',
+      texto: 'Cada e-mail só pode estar em uma conta. Ele é usado para compartilhar veículos com você.',
+      campos: [{ id: 'dlg-email', rotulo: 'E-mail', tipo: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'nome@gmail.com', valor: p.email || '' }],
+      sim: 'Salvar',
+      aoConfirmar: async (v) => {
+        const email = normalizarEmail(v['dlg-email']);
+        if (!email) return 'Informe um e-mail válido (ex.: nome@gmail.com).';
+        if (!navigator.onLine) return 'Sem internet. Conecte o celular e tente de novo.';
+        try {
+          const r = await Api.chamar('salvarEmail', { email }, { tempoMs: 20000 });
+          const atual = await Perfil.obter();
+          atual.email = r.email || email;
+          atual.precisaEmail = false;
+          await Perfil.salvar(atual);
+          if (telaAtual === 'config') renderConta(atual);
+          toast('E-mail salvo.');
+          return '';
+        } catch (e) {
+          return mensagemErroGeral(e);
+        }
+      }
+    });
+  }
+
+  // Conta sem e-mail (criada antes da V5): toda vez que o app abre, pergunta se quer cadastrar (não bloqueia o uso)
+  let emailPerguntado = false;
+  async function talvezPedirEmail() {
+    if (emailPerguntado || removido) return;
+    const p = await Perfil.obter();
+    if (!p || !p.token || p.precisaEmail !== true) return;
+    emailPerguntado = true;
+    let espera = 0;
+    const tentar = async () => {
+      // espera a tela inicial ficar livre (sem "O que há de novo" ou outro aviso aberto)
+      if (dialogoAberto || telaAtual !== 'inicio') {
+        if ((espera += 1) < 240) setTimeout(tentar, 500); // tenta por até 2 minutos
+        else emailPerguntado = false;
+        return;
+      }
+      const atual = await Perfil.obter();
+      if (!atual || !atual.token || atual.precisaEmail !== true) return;
+      const quer = await escolher('📧 Cadastre seu e-mail. Agora cada conta tem um e-mail (só um por conta): ele é usado para compartilhar veículos com você.', [
+        { valor: true, texto: 'Cadastrar', classe: 'primario' },
+        { valor: false, texto: 'Agora não' }
+      ]);
+      if (quer) await dialogoEmail(await Perfil.obter());
+    };
+    setTimeout(tentar, 900);
   }
 
   async function abrirConfig() {
@@ -1720,6 +1853,7 @@
       }
     });
   };
+  $('cfg-email').onclick = async () => { await dialogoEmail(await Perfil.obter()); };
   $('cfg-senha').onclick = () => dialogoCampos({
     titulo: 'Trocar senha',
     texto: 'Os outros celulares em que você já entrou continuam conectados.',
@@ -1927,7 +2061,9 @@
         if (faltam === 0 && !r.erros.length) rotulo('Sincronizado', 'verde', 2500);
         else rotulo('');
       }
-      if (r.interpretados) toast(textoLidos(r), 4500);
+      if (r.compartilhados && r.compartilhados.length) toast(r.compartilhados.join(' '), 6000);
+      else if (r.descompartilhados && r.descompartilhados.length) toast(r.descompartilhados.join(' '), 6000);
+      else if (r.interpretados) toast(textoLidos(r), 4500);
       else if (r.veiculosLidos) toast(r.veiculosLidos === 1 ? 'Um abastecimento foi lido. Abra para revisar.' : `${r.veiculosLidos} abastecimentos foram lidos. Abra para revisar.`, 4500);
       else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios e as notas serão lidos mais tarde.', 4500);
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
@@ -1938,6 +2074,7 @@
       if (telaAtual === 'config') renderInfo();
       if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
       buscarPedidos();
+      talvezPedirEmail(); // logo depois da atualização para a V5, o servidor avisa aqui que a conta está sem e-mail
       return;
     }
     if (d.estado === 'falhou' || d.estado === 'erro') {
@@ -2036,7 +2173,7 @@
     esc, brl, plural, toast, confirmar, escolher, abrirDialogo, fecharDialogo, menuMais, listas, preencherSelect,
     obterLocalizacao, mensagemErroGeral, miniatura, listasVisor, toqueNaMiniatura, baixarArquivo, erroAoBaixar,
     tirarFotos, adicionarFotos, fmtDuracao, urlDe, agendarSync, mostrarTela, voltar, exibirInicio, quandoHistoricoPronto,
-    chaveDia, ehDinheiro,
+    chaveDia, ehDinheiro, normalizarEmail, dialogoCampos, mostrarDica,
     telaAtual: () => telaAtual,
     dadosTela: () => dadosTela
   };
@@ -2062,6 +2199,7 @@
       await Banco.gravarConfig('versaoVista', VERSAO_DO_APP);
       setTimeout(abrirNovidades, 700);
     }
+    talvezPedirEmail(); // conta sem e-mail: pergunta toda vez que o app abre
   }
 
   iniciar();

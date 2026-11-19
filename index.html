@@ -38,6 +38,11 @@
         <input id="bv-zap" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="(83) 99999-8888">
         <small class="dica">Usado só se você esquecer a senha: o organizador manda um código para ele.</small>
       </div>
+      <div id="bv-bloco-email">
+        <label for="bv-email">E-mail</label>
+        <input id="bv-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="nome@gmail.com">
+        <small class="dica">Cada e-mail só pode estar em uma conta. Ele é usado para compartilhar veículos com você.</small>
+      </div>
       <div id="bv-bloco-codigo" class="oculto">
         <label for="bv-codigo">Código do grupo</label>
         <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
@@ -246,6 +251,7 @@
       <div class="conta-info" id="cfg-conta"></div>
       <div class="linha-botoes">
         <button class="botao pequeno" id="cfg-zap" type="button">Alterar WhatsApp</button>
+        <button class="botao pequeno" id="cfg-email" type="button">Alterar e-mail</button>
         <button class="botao pequeno" id="cfg-senha" type="button">Trocar senha</button>
       </div>
 
@@ -311,6 +317,9 @@
           <input id="vf-placa" autocapitalize="characters" autocomplete="off" maxlength="8" placeholder="ABC1D23">
         </div>
       </div>
+      <label for="vf-cor">Cor</label>
+      <input id="vf-cor" list="vf-cores" autocapitalize="words" autocomplete="off" placeholder="Ex.: Prata">
+      <datalist id="vf-cores"></datalist>
       <p class="erro" id="vf-erro"></p>
       <div class="rodape-form">
         <button class="botao primario grande" id="vf-salvar" type="button">Salvar</button>
@@ -324,7 +333,7 @@
     <header class="topo">
       <button class="botao-icone" id="vx-voltar" aria-label="Voltar">←</button>
       <div class="topo-textos"><div class="topo-titulo" id="vx-titulo"></div><div class="topo-sub" id="vx-sub"></div></div>
-      <button class="botao-icone" id="vx-editar" type="button" aria-label="Editar o veículo" title="Editar o veículo">✏️</button>
+      <button class="botao-icone" id="vx-config" type="button" aria-label="Configurações do veículo" title="Configurações do veículo">⚙️</button>
     </header>
     <div class="totais" id="vx-totais"></div>
     <div id="vx-lista" class="com-fab"></div>
@@ -361,6 +370,29 @@
       <span></span>
     </header>
     <div class="conteudo" id="vr-conteudo"></div>
+  </section>
+
+  <!-- ============ VEÍCULO: compartilhar com outras contas (V5) ============ -->
+  <section id="tela-v-compartilhar" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vs-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Compartilhar veículo</div><div class="topo-sub" id="vs-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <p class="dica">A pessoa vê tudo deste veículo e lança gastos nele, mas só altera ou exclui o que ela mesma lançou. Você continua podendo tudo e tira a pessoa quando quiser.</p>
+      <div id="vs-aviso"></div>
+      <h3>Com quem está compartilhado</h3>
+      <div id="vs-pessoas"></div>
+      <h3>Compartilhar com mais alguém</h3>
+      <label for="vs-nome">Primeiro nome da pessoa</label>
+      <input id="vs-nome" autocapitalize="words" autocomplete="off" placeholder="Ex.: Maria">
+      <label for="vs-email">E-mail da pessoa</label>
+      <input id="vs-email" type="email" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="nome@gmail.com">
+      <small class="dica">O mesmo e-mail que a pessoa cadastrou no app dela. Precisa de internet.</small>
+      <p class="erro" id="vs-erro"></p>
+      <button class="botao primario grande" id="vs-compartilhar" type="button">👥 Compartilhar</button>
+    </div>
   </section>
 
   <!-- ============ APP REMOVIDO ============ -->
