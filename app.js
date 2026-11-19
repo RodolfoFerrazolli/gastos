@@ -8,6 +8,7 @@
 
   const $ = (id) => document.getElementById(id);
   let telaAtual = null;
+  let dadosTela = null; // dados da tela atual (ex.: qual veículo está aberto), guardados também no histórico
   let urlsTemporarias = [];
   let promptInstalacao = null;
   let swEsperando = null;
@@ -22,6 +23,15 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 4', itens: [
+      '➕ <b>Botão +</b> no meio da parte de baixo da tela inicial: ele abre o <b>Lançar por voz</b>, o <b>Lançar por foto</b>, o <b>Lançar por texto</b> e o novo <b>Veículos</b>. O histórico fica logo abaixo do título.',
+      '🚗 <b>Veículos:</b> cadastre seus veículos (montadora, modelo, ano e placa) e lance os gastos de cada um: <b>abastecimento</b>, <b>manutenção</b>, <b>despesas</b> (seguro, IPVA, licenciamento, multas e outros) e uma <b>galeria</b> de fotos. Cada veículo tem o extrato dele, do mais novo para o mais velho, com o total. Esses gastos não entram no histórico da tela inicial.',
+      '⛽ <b>Abastecimento:</b> combustível e tanque cheio, hodômetro (o último fica de fundo), valor do litro (vem com o último que você pagou), valor total, litros calculados, data, pagamento e local pelo GPS. Dá para <b>lançar por voz</b> ou <b>ler a nota do posto</b>: a IA preenche só os campos vazios.',
+      '🔢 Nos valores dos veículos você digita só os números, como numa calculadora (6 → 0,006 → 0,061 → 6,199).',
+      '⚠️ Abastecimento ou manutenção sem hodômetro, ou com o km fora de ordem, ficam marcados com ⚠️.',
+      '💵 Pagando em <b>Dinheiro</b>, o campo Banco/conta fica desligado.',
+      '⚙️ Nas Configurações, o botão <b>Sair da conta neste celular</b> foi para junto do <b>Remover app</b>.'
+    ] },
     { titulo: 'Versão 3', itens: [
       '🔍 <b>Ver as fotos:</b> toque na foto para abrir em tela cheia. Amplie com dois dedos (ou com dois toques) e arraste para o lado para ver a próxima. Foto ou áudio que já saiu do celular é baixado do servidor na hora (precisa de internet).',
       '📸 <b>Câmera melhor:</b> o app usa a câmera principal de trás, com foco automático, e você pode tocar na nota para focar. O botão do flash aparece sempre (se o celular não liberar o flash para o app, ele explica o que fazer). Celular com várias câmeras atrás: o botão 🔄 troca de câmera.',
@@ -215,7 +225,7 @@
     quandoHistoricoPronto(() => {
       if (dialogoAberto !== d) return;
       d.entrada = true;
-      history.pushState({ tela: telaAtual, dialogo: true }, '');
+      history.pushState(Object.assign(estadoTela(), { dialogo: true }), '');
     });
   }
   function fecharDialogo() {
@@ -235,7 +245,7 @@
     const d = dialogoAberto;
     dialogoAberto = null;
     $('dialogo').innerHTML = '';
-    if (!d.entrada) history.pushState({ tela: telaAtual }, ''); // o "voltar" tirou a entrada da tela: devolve
+    if (!d.entrada) history.pushState(estadoTela(), ''); // o "voltar" tirou a entrada da tela: devolve
     d.aoVoltar();
     return true;
   }
@@ -282,6 +292,25 @@
         ok(true);
       };
       setTimeout(() => { const f = $(campos[0].id); if (f) f.focus(); }, 50);
+    });
+  }
+  /**
+   * Menu do botão "+": opções grandes acima do botão (que vira um "×"). Tocar fora, no "×" ou no
+   * "voltar" do celular fecha. Devolve o "valor" da opção escolhida (null se fechou).
+   */
+  function menuMais(rotulo, opcoes) {
+    $('toast').classList.add('oculto'); // o aviso que estava na tela não cobre as opções
+    return new Promise((ok) => {
+      abrirDialogo(`<div class="fundo-dialogo menu-mais" id="mm-fundo"><div class="folha-mais" role="dialog" aria-label="${esc(rotulo)}">` +
+        opcoes.map((o, i) => `<button class="opcao-mais" type="button"${o.id ? ` id="${esc(o.id)}"` : ''} data-opcao="${i}">` +
+          `<span class="icone-mais" aria-hidden="true">${o.icone}</span>${esc(o.texto)}</button>`).join('') +
+        '</div><button class="fab fechar" type="button" id="mm-fechar" aria-label="Fechar"><span aria-hidden="true">+</span></button></div>',
+      () => ok(null));
+      $('dialogo').querySelectorAll('[data-opcao]').forEach((b) => {
+        b.onclick = () => { fecharDialogo(); ok(opcoes[Number(b.dataset.opcao)].valor); };
+      });
+      $('mm-fechar').onclick = () => { fecharDialogo(); ok(null); };
+      $('mm-fundo').addEventListener('click', (e) => { if (e.target === e.currentTarget) { fecharDialogo(); ok(null); } });
     });
   }
   function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
@@ -361,12 +390,17 @@
   // ------------------------------------------------------------------
   //  Navegação (o botão "voltar" do Android também funciona)
   // ------------------------------------------------------------------
-  function mostrarTela(nome, { empilhar = true } = {}) {
+  function estadoTela() {
+    return dadosTela ? { tela: telaAtual, dados: dadosTela } : { tela: telaAtual };
+  }
+  function mostrarTela(nome, { empilhar = true, dados = null } = {}) {
     document.querySelectorAll('.tela').forEach(t => t.classList.add('oculto'));
     $('tela-' + nome).classList.remove('oculto');
     telaAtual = nome;
+    dadosTela = dados;
+    document.body.classList.toggle('tem-fab', nome === 'inicio' || nome === 'veiculo'); // o aviso (toast) sobe acima do "+"
     window.scrollTo(0, 0);
-    if (empilhar) quandoHistoricoPronto(() => history.pushState({ tela: nome }, ''));
+    if (empilhar) { const estado = estadoTela(); quandoHistoricoPronto(() => history.pushState(estado, '')); }
   }
   async function podeSairDaTela() {
     if (telaAtual === 'form' && Form.alterado) {
@@ -389,25 +423,33 @@
     if (Visor.aberto()) {
       // "voltar" com uma foto aberta em tela cheia: só fecha a foto
       Visor.fechar();
-      history.pushState({ tela: telaAtual }, '');
+      history.pushState(estadoTela(), '');
       return;
     }
     if (Camera.aberta()) {
       // "voltar" com a câmera aberta: só fecha a câmera
       Camera.cancelar();
-      history.pushState({ tela: telaAtual }, '');
+      history.pushState(estadoTela(), '');
       return;
     }
     if (Recorte.aberto()) {
       // "voltar" com a tela de recorte aberta: só fecha o recorte
       Recorte.cancelar();
-      history.pushState({ tela: telaAtual }, '');
+      history.pushState(estadoTela(), '');
       return;
     }
     if (telaAtual === 'senha') { mostrarTela('boas-vindas', { empilhar: false }); return; }
     if (['inicio', 'boas-vindas', 'whatsapp', 'removido'].includes(telaAtual)) return;
+    if (Veiculos.ehTela(telaAtual)) {
+      // telas dos veículos: uma dentro da outra; o "voltar" vai para a tela anterior (guardada no histórico)
+      const destino = history.state;
+      if (!(await Veiculos.podeSair())) { quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); return; }
+      if (destino && Veiculos.ehTela(destino.tela)) Veiculos.mostrar(destino.tela, destino.dados);
+      else exibirInicio();
+      return;
+    }
     if (await podeSairDaTela()) exibirInicio();
-    else quandoHistoricoPronto(() => history.pushState({ tela: telaAtual }, '')); // depois que a pergunta sair do histórico
+    else quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); // depois que a pergunta sair do histórico
   });
   function voltar() {
     quandoHistoricoPronto(() => {
@@ -588,6 +630,8 @@
   async function limparDadosLocais() {
     await Banco.limpar('lancamentos');
     await Banco.limpar('arquivos');
+    await Banco.limpar('veiculos');
+    await Banco.limpar('registros');
     for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite']) await Banco.apagar('config', k);
   }
 
@@ -849,7 +893,7 @@
     $('totais').innerHTML = `<div><small>Hoje</small><b>${brl(totalHoje)}</b></div><div><small>Total lançado</small><b>${brl(total)}</b></div>`;
 
     if (!lancs.length) {
-      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Use os botões acima para lançar seu primeiro gasto.</div>';
+      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar seu primeiro gasto.</div>';
     } else {
       let html = '';
       let diaAtual = '';
@@ -893,6 +937,12 @@
         : !audios ? (notas === 1 ? 'Não foi possível ler 1 nota. Preencha você mesmo.' : `Não foi possível ler ${notas} notas. Preencha você mesmo.`)
           : `${comErro.length} lançamentos não foram lidos pela IA. Preencha você mesmo.`;
       html.push(alerta('vermelho', texto, 'Ver', 'erro-ia'));
+    }
+    // veículos (V4): abastecimento lido pela IA (voz ou nota do posto) esperando a revisão
+    const regsRevisar = await Veiculos.paraRevisar();
+    if (regsRevisar.length) {
+      html.push(alerta('azul', regsRevisar.length === 1 ? '1 abastecimento foi lido e está pronto para revisar.'
+        : `${regsRevisar.length} abastecimentos foram lidos e estão prontos para revisar.`, 'Revisar', 'revisar-veiculo'));
     }
     const aguardando = lancs.filter(l => l.status === 'aguardando_ia').length;
     const limite = await Banco.lerConfig('iaLimite', null);
@@ -975,6 +1025,10 @@
       renderInicio();
     }
     if (acao === 'atualizar-app' && swEsperando) { pedimosAtualizacao = true; swEsperando.postMessage('atualizar'); }
+    if (acao === 'revisar-veiculo') {
+      const r = (await Veiculos.paraRevisar())[0];
+      if (r) Veiculos.abrirRegistro(r.id);
+    }
     if (acao === 'revisar' || acao === 'erro-ia') {
       const alvo = acao === 'revisar' ? 'revisar' : 'erro_ia';
       const l = (await Banco.todos('lancamentos'))
@@ -1021,9 +1075,19 @@
     if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 5000); return; }
     Sync.sincronizar({ manual: true });
   };
-  $('btn-voz').onclick = () => abrirVoz();
-  $('btn-foto').onclick = () => abrirFoto();
-  $('btn-texto').onclick = () => abrirNovoTexto();
+  // botão "+": as três formas de lançar e os veículos
+  $('btn-mais').onclick = async () => {
+    const escolha = await menuMais('Lançar', [
+      { valor: 'voz', id: 'btn-voz', icone: '🎤', texto: 'Lançar por voz' },
+      { valor: 'foto', id: 'btn-foto', icone: '📷', texto: 'Lançar por foto' },
+      { valor: 'texto', id: 'btn-texto', icone: '✏️', texto: 'Lançar por texto' },
+      { valor: 'veiculos', id: 'btn-veiculos', icone: '🚗', texto: 'Veículos' }
+    ]);
+    if (escolha === 'voz') abrirVoz();
+    else if (escolha === 'foto') abrirFoto();
+    else if (escolha === 'texto') abrirNovoTexto();
+    else if (escolha === 'veiculos') Veiculos.abrirLista();
+  };
   $('ini-config').onclick = () => abrirConfig();
 
   // ------------------------------------------------------------------
@@ -1078,6 +1142,7 @@
     preencherSelect($('f-cat'), L.categorias, l.categoria, 'Escolha a categoria');
     preencherSelect($('f-meio'), L.meios, l.meioPagamento, 'Não informado');
     $('f-banco').value = l.banco || '';
+    travarBanco();
     $('f-titular').value = l.titular || '';
     $('f-estab').value = l.estabelecimento || '';
     $('f-itens').innerHTML = '';
@@ -1195,6 +1260,18 @@
       : '';
   }
   $('f-add-item').onclick = () => { addItem(); Form.alterado = true; };
+  // pagamento em dinheiro: o dinheiro está com a pessoa, não tem banco/conta (o titular continua)
+  function ehDinheiro(meio) {
+    return /^(dinheiro|especie|em especie)$/.test(String(meio || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase());
+  }
+  function travarBanco() {
+    const dinheiro = ehDinheiro($('f-meio').value);
+    const b = $('f-banco');
+    if (dinheiro) b.value = '';
+    b.disabled = dinheiro;
+    b.placeholder = dinheiro ? 'Não se aplica (dinheiro)' : 'Ex.: Nubank';
+  }
+  $('f-meio').addEventListener('change', travarBanco);
   $('f-valor').addEventListener('input', atualizarSoma);
   // (escolher foto não conta como alteração sozinho: só se a pessoa usar a foto no recorte)
   $('tela-form').addEventListener('input', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
@@ -1337,7 +1414,7 @@
       valorTotal: valor,
       categoria,
       meioPagamento: $('f-meio').value,
-      banco: $('f-banco').value.trim(),
+      banco: ehDinheiro($('f-meio').value) ? '' : $('f-banco').value.trim(),
       titular: $('f-titular').value.trim(),
       estabelecimento: $('f-estab').value.trim()
     });
@@ -1851,6 +1928,7 @@
         else rotulo('');
       }
       if (r.interpretados) toast(textoLidos(r), 4500);
+      else if (r.veiculosLidos) toast(r.veiculosLidos === 1 ? 'Um abastecimento foi lido. Abra para revisar.' : `${r.veiculosLidos} abastecimentos foram lidos. Abra para revisar.`, 4500);
       else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios e as notas serão lidos mais tarde.', 4500);
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
       else if (r.erros.length) toast('Alguns itens não foram enviados; vou tentar de novo.', 4000);
@@ -1858,6 +1936,7 @@
       if (telaAtual === 'inicio') renderInicio();
       else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
+      if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
       buscarPedidos();
       return;
     }
@@ -1949,6 +2028,18 @@
       }
     }
   }
+
+  // ------------------------------------------------------------------
+  //  Funções do app usadas pelas telas dos veículos (veiculos.js)
+  // ------------------------------------------------------------------
+  window.App = {
+    esc, brl, plural, toast, confirmar, escolher, abrirDialogo, fecharDialogo, menuMais, listas, preencherSelect,
+    obterLocalizacao, mensagemErroGeral, miniatura, listasVisor, toqueNaMiniatura, baixarArquivo, erroAoBaixar,
+    tirarFotos, adicionarFotos, fmtDuracao, urlDe, agendarSync, mostrarTela, voltar, exibirInicio, quandoHistoricoPronto,
+    chaveDia, ehDinheiro,
+    telaAtual: () => telaAtual,
+    dadosTela: () => dadosTela
+  };
 
   async function iniciar() {
     try {

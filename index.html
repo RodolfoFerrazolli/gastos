@@ -121,14 +121,10 @@
 
     <div id="alertas"></div>
 
-    <div class="acoes-principais">
-      <button id="btn-voz" class="botao primario grande">🎤 Lançar por voz</button>
-      <button id="btn-foto" class="botao secundario grande">📷 Lançar por foto</button>
-      <button id="btn-texto" class="botao secundario grande">✏️ Lançar por texto</button>
-    </div>
-
     <div class="totais" id="totais"></div>
-    <div id="lista"></div>
+    <div id="lista" class="com-fab"></div>
+    <!-- botão "+": lançar por voz, por foto, por texto e veículos -->
+    <button id="btn-mais" class="fab" type="button" aria-label="Lançar" title="Lançar"><span aria-hidden="true">+</span></button>
   </section>
 
   <!-- ============ FORMULÁRIO (novo, editar, revisar) ============ -->
@@ -270,14 +266,101 @@
       <p class="dica">Apaga deste celular as fotos e os áudios que já foram enviados, para liberar espaço. Os gastos continuam aqui, e as fotos e os áudios continuam guardados no servidor (dá para ver de novo quando tiver internet).</p>
       <button class="botao" id="cfg-limpar" type="button">🧹 Limpar dados</button>
 
-      <h3>Outro celular</h3>
-      <p class="dica">Para usar o app em outro celular, entre com o mesmo nome e senha. Seus lançamentos aparecem lá também.</p>
-      <button class="botao perigo" id="cfg-sair">Sair da conta neste celular</button>
-
       <h3>Remover o app</h3>
       <p class="dica">Apaga deste celular tudo o que o app guardou (lançamentos, fotos e áudios). O que já foi enviado continua no servidor: para voltar, abra o link do app e entre com seu nome e senha.</p>
-      <button class="botao perigo" id="cfg-remover">Remover app</button>
+      <div class="coluna-botoes">
+        <button class="botao perigo" id="cfg-sair">Sair da conta neste celular</button>
+        <button class="botao perigo" id="cfg-remover">Remover app</button>
+      </div>
     </div>
+  </section>
+
+  <!-- ============ VEÍCULOS (V4): lista dos veículos da conta ============ -->
+  <section id="tela-veiculos" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vc-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Veículos</div></div>
+      <span></span>
+    </header>
+    <div id="vc-lista" class="lista-veiculos"></div>
+    <div class="conteudo">
+      <button class="botao primario grande" id="vc-adicionar" type="button">+ Adicionar veículo</button>
+    </div>
+  </section>
+
+  <!-- ============ CADASTRO DO VEÍCULO (novo, editar) ============ -->
+  <section id="tela-veiculo-form" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vf-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="vf-titulo">Novo veículo</div></div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <label for="vf-montadora">Montadora</label>
+      <input id="vf-montadora" list="vf-montadoras" autocapitalize="words" autocomplete="off" placeholder="Ex.: Chevrolet">
+      <datalist id="vf-montadoras"></datalist>
+      <label for="vf-modelo">Modelo</label>
+      <input id="vf-modelo" autocapitalize="words" autocomplete="off" placeholder="Ex.: Onix">
+      <div class="duas-colunas">
+        <div>
+          <label for="vf-ano">Ano</label>
+          <input id="vf-ano" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="Ex.: 2020">
+        </div>
+        <div>
+          <label for="vf-placa">Placa</label>
+          <input id="vf-placa" autocapitalize="characters" autocomplete="off" maxlength="8" placeholder="ABC1D23">
+        </div>
+      </div>
+      <p class="erro" id="vf-erro"></p>
+      <div class="rodape-form">
+        <button class="botao primario grande" id="vf-salvar" type="button">Salvar</button>
+        <button class="botao perigo" id="vf-excluir" type="button">Excluir veículo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VEÍCULO: extrato (tudo o que o veículo já gastou) ============ -->
+  <section id="tela-veiculo" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vx-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="vx-titulo"></div><div class="topo-sub" id="vx-sub"></div></div>
+      <button class="botao-icone" id="vx-editar" type="button" aria-label="Editar o veículo" title="Editar o veículo">✏️</button>
+    </header>
+    <div class="totais" id="vx-totais"></div>
+    <div id="vx-lista" class="com-fab"></div>
+    <button id="vx-mais" class="fab" type="button" aria-label="Lançar gasto do veículo" title="Lançar gasto do veículo"><span aria-hidden="true">+</span></button>
+  </section>
+
+  <!-- ============ VEÍCULO: despesas e impostos (escolher o tipo) ============ -->
+  <section id="tela-v-menu" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vm-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="vm-titulo"></div><div class="topo-sub" id="vm-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo"><div class="grade-opcoes" id="vm-opcoes"></div></div>
+  </section>
+
+  <!-- ============ VEÍCULO: lista de um tipo (manutenção, seguro, IPVA, licenciamento, multas, outros, galeria) ============ -->
+  <section id="tela-v-lista" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vl-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="vl-titulo"></div><div class="topo-sub" id="vl-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo sem-fundo"><button class="botao primario grande" id="vl-adicionar" type="button">+ Adicionar</button></div>
+    <div class="totais" id="vl-totais"></div>
+    <div id="vl-lista" class="lista-fim"></div>
+  </section>
+
+  <!-- ============ VEÍCULO: gasto (novo, editar, revisar) — os campos mudam com o tipo ============ -->
+  <section id="tela-v-registro" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="vr-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="vr-titulo"></div><div class="topo-sub" id="vr-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo" id="vr-conteudo"></div>
   </section>
 
   <!-- ============ APP REMOVIDO ============ -->
@@ -373,6 +456,7 @@
   <script src="recorte.js"></script>
   <script src="visor.js"></script>
   <script src="sincronizacao.js"></script>
+  <script src="veiculos.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

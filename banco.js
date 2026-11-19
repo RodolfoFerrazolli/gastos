@@ -1,10 +1,11 @@
 // =====================================================================
 //  BANCO LOCAL (IndexedDB): guarda lançamentos, fotos e áudios no
-//  aparelho até que sejam enviados ao servidor.
+//  aparelho até que sejam enviados ao servidor. Na V4 entram os
+//  veículos e os gastos de cada um ("registros").
 // =====================================================================
 const Banco = (() => {
   const NOME = 'controle-gastos';
-  const VERSAO = 1;
+  const VERSAO = 2; // 2 = V4 (veículos)
   let conexao = null;
   let desativado = false; // depois de "Remover app" o banco não é criado de novo
 
@@ -21,6 +22,12 @@ const Banco = (() => {
           s.createIndex('lancamentoId', 'lancamentoId', { unique: false });
         }
         if (!db.objectStoreNames.contains('config')) db.createObjectStore('config', { keyPath: 'chave' });
+        // V4: veículos e os gastos de cada veículo (as fotos e o áudio deles ficam em "arquivos")
+        if (!db.objectStoreNames.contains('veiculos')) db.createObjectStore('veiculos', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('registros')) {
+          const r = db.createObjectStore('registros', { keyPath: 'id' });
+          r.createIndex('veiculoId', 'veiculoId', { unique: false });
+        }
       };
       req.onsuccess = () => {
         conexao = req.result;
