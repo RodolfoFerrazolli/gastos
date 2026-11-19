@@ -38,8 +38,11 @@
         <input id="bv-zap" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="(83) 99999-8888">
         <small class="dica">Usado só se você esquecer a senha: o organizador manda um código para ele.</small>
       </div>
-      <label for="bv-codigo">Código do grupo</label>
-      <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+      <div id="bv-bloco-codigo" class="oculto">
+        <label for="bv-codigo">Código do grupo</label>
+        <input id="bv-codigo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+        <small class="dica">Ele vem no link do app que o organizador mandou.</small>
+      </div>
       <button id="bv-comecar" class="botao primario grande">Criar conta</button>
       <p id="bv-erro" class="erro"></p>
       <p class="dica" id="bv-dica">Guarde o nome e a senha: com eles você entra na sua conta em qualquer celular.</p>
@@ -59,8 +62,10 @@
         <p class="dica-grande">Digite o nome da sua conta e toque em <b>Pedir código</b>. O organizador vai mandar um código de 6 números para o seu WhatsApp.</p>
         <label for="es-nome">Nome e sobrenome</label>
         <input id="es-nome" autocomplete="username" autocapitalize="words" placeholder="Ex.: Maria Silva">
-        <label for="es-grupo">Código do grupo</label>
-        <input id="es-grupo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+        <div id="es-bloco-grupo" class="oculto">
+          <label for="es-grupo">Código do grupo</label>
+          <input id="es-grupo" autocomplete="off" autocapitalize="off" placeholder="Peça ao organizador">
+        </div>
         <button id="es-pedir" class="botao primario grande">Pedir código</button>
       </div>
       <div id="es-passo2" class="oculto">
@@ -172,7 +177,7 @@
 
       <label>Fotos da nota ou comprovante</label>
       <div class="fotos" id="f-fotos"></div>
-      <div class="linha-botoes">
+      <div class="linha-botoes botoes-foto">
         <button class="botao pequeno" type="button" id="f-camera">📷 Tirar foto</button>
         <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="f-galeria"></label>
       </div>
@@ -202,7 +207,7 @@
 
       <label>Fotos da nota ou comprovante <small>(opcional)</small></label>
       <div class="fotos" id="voz-fotos"></div>
-      <div class="linha-botoes">
+      <div class="linha-botoes botoes-foto">
         <button class="botao pequeno" type="button" id="voz-camera">📷 Tirar foto</button>
         <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="voz-galeria"></label>
       </div>
@@ -223,9 +228,9 @@
         Nota comprida? Tire mais de uma foto, de cima para baixo.</p>
       <div class="fotos fotos-nota" id="foto-lista"></div>
       <div id="foto-qr" class="foto-qr"></div>
-      <div class="linha-botoes">
-        <button class="botao pequeno" type="button" id="foto-camera">📷 Tirar foto</button>
-        <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="foto-galeria"></label>
+      <div class="linha-botoes botoes-foto grandes">
+        <button class="botao" type="button" id="foto-camera"><span class="icone-grande" aria-hidden="true">📷</span><span id="foto-camera-texto">Tirar foto</span></button>
+        <label class="botao arquivo"><span class="icone-grande" aria-hidden="true">🖼️</span>Galeria<input type="file" accept="image/*" multiple id="foto-galeria"></label>
       </div>
       <button class="botao primario grande" id="foto-salvar" disabled>Salvar</button>
     </div>
@@ -248,13 +253,6 @@
         <button class="botao pequeno" id="cfg-senha" type="button">Trocar senha</button>
       </div>
 
-      <label for="cfg-codigo">Código do grupo</label>
-      <div class="campo-oculto">
-        <input id="cfg-codigo" class="embacado" autocapitalize="off" autocomplete="off" spellcheck="false" readonly>
-        <button class="olho" id="cfg-olho" type="button" aria-label="Mostrar o código" title="Mostrar o código"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92A11.8 11.8 0 0 0 22.99 12C21.26 7.61 16.99 4.5 12 4.5c-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg></button>
-      </div>
-      <button class="botao primario" id="cfg-salvar" disabled>Salvar código</button>
-
       <h3>Informações</h3>
       <dl class="info" id="cfg-info"></dl>
 
@@ -266,7 +264,11 @@
 
       <h3>Câmera</h3>
       <label class="marcar"><input type="checkbox" id="cfg-camera-sistema"> Usar a câmera do próprio celular</label>
-      <p class="dica">Deixe desmarcado para usar a câmera do app (com lanterna e sem a tela “Repetir / OK”). Marque só se a câmera do app der problema neste celular.</p>
+      <p class="dica">Deixe desmarcado para usar a câmera do app (com foco automático, flash quando o celular permite e sem a tela “Repetir / OK”). Marque só se a câmera do app der problema neste celular.</p>
+
+      <h3>Limpar dados</h3>
+      <p class="dica">Apaga deste celular as fotos e os áudios que já foram enviados, para liberar espaço. Os gastos continuam aqui, e as fotos e os áudios continuam guardados no servidor (dá para ver de novo quando tiver internet).</p>
+      <button class="botao" id="cfg-limpar" type="button">🧹 Limpar dados</button>
 
       <h3>Outro celular</h3>
       <p class="dica">Para usar o app em outro celular, entre com o mesmo nome e senha. Seus lançamentos aparecem lá também.</p>
@@ -322,6 +324,7 @@
   <!-- ============ CÂMERA DO APP ============ -->
   <div id="camera" class="camera oculto" role="dialog" aria-label="Câmera">
     <video id="camera-video" playsinline muted autoplay></video>
+    <div id="camera-foco" class="camera-foco oculto" aria-hidden="true"></div>
     <div class="camera-topo">
       <button id="camera-fechar" class="camera-botao" type="button" aria-label="Fechar a câmera">✕</button>
       <b id="camera-titulo">Foto da nota</b>
@@ -329,12 +332,33 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
       </button>
     </div>
+    <div id="camera-carregando" class="camera-carregando oculto">Preparando a câmera…</div>
+    <div id="camera-dica" class="camera-dica oculto">Toque na nota para focar.<br>Se ficar borrado, afaste um pouco o celular.</div>
     <div id="camera-msg" class="camera-msg oculto"></div>
     <div class="camera-baixo">
+      <span></span>
       <button id="camera-disparo" class="camera-disparo" type="button" aria-label="Tirar foto"></button>
+      <button id="camera-trocar" class="camera-botao oculto" type="button" aria-label="Trocar de câmera">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-8.66 3.4l-1.42 1.42A7 7 0 0 0 19 13c0-3.87-3.13-7-7-7zm-6.83.6L3.75 8.02A7 7 0 0 0 5 13H3l3.5 3.5L10 13H7a5 5 0 0 1 .17-6.4z"/></svg>
+      </button>
     </div>
   </div>
   <input type="file" accept="image/*" capture="environment" id="camera-sistema" class="invisivel" tabindex="-1" aria-hidden="true">
+
+  <!-- ============ VISOR DE FOTOS ============ -->
+  <div id="visor" class="visor oculto" role="dialog" aria-label="Foto">
+    <div id="visor-palco" class="visor-palco">
+      <img id="visor-img" class="oculto" alt="Foto" draggable="false">
+    </div>
+    <div id="visor-msg" class="visor-msg oculto" role="status"></div>
+    <div class="visor-topo">
+      <button id="visor-fechar" class="camera-botao" type="button" aria-label="Fechar a foto">✕</button>
+      <b id="visor-contador"></b>
+      <span></span>
+    </div>
+    <button id="visor-ant" class="visor-seta esquerda oculto" type="button" aria-label="Foto anterior">‹</button>
+    <button id="visor-prox" class="visor-seta direita oculto" type="button" aria-label="Próxima foto">›</button>
+  </div>
 
   <div id="toast" class="toast oculto"></div>
   <div id="dialogo"></div>
@@ -347,6 +371,7 @@
   <script src="qr.js"></script>
   <script src="camera.js"></script>
   <script src="recorte.js"></script>
+  <script src="visor.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="app.js"></script>
 </body>

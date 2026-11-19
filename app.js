@@ -22,6 +22,15 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 3', itens: [
+      '🔍 <b>Ver as fotos:</b> toque na foto para abrir em tela cheia. Amplie com dois dedos (ou com dois toques) e arraste para o lado para ver a próxima. Foto ou áudio que já saiu do celular é baixado do servidor na hora (precisa de internet).',
+      '📸 <b>Câmera melhor:</b> o app usa a câmera principal de trás, com foco automático, e você pode tocar na nota para focar. O botão do flash aparece sempre (se o celular não liberar o flash para o app, ele explica o que fazer). Celular com várias câmeras atrás: o botão 🔄 troca de câmera.',
+      '🧾 <b>Lançar por foto:</b> primeiro você escolhe entre <b>Tirar foto</b> e <b>Galeria</b>.',
+      '🔄 <b>Setas de sincronização:</b> giram sem texto. Tocando nelas enquanto estão amarelas aparece “Sincronizando…”; tocando e segurando aparece a situação (ex.: “Sincronizado”).',
+      '🧹 <b>Limpar dados</b> (em Configurações): apaga do celular as fotos e os áudios que já estão no servidor, para liberar espaço. Os gastos continuam aqui.',
+      '🔑 O <b>código do grupo</b> saiu das Configurações: ele já vem no link do app.',
+      '✨ E mais: o “voltar” do celular fecha estas janelas, os botões de foto têm o mesmo tamanho e os textos não ficam selecionados ao tocar.'
+    ] },
     { titulo: 'Versão 2', itens: [
       '📷 <b>Lançar por foto:</b> tire a foto da nota fiscal e o app preenche os itens (com quantidade e preço de cada um), o total, o local, a data e a hora. Se a nota tiver QR Code, os dados vêm direto do site da SEFAZ.',
       '📸 <b>Câmera dentro do app</b>, com lanterna: depois da foto você vai direto para o recorte, que agora tem o botão <b>Repetir foto</b>.',
@@ -188,14 +197,56 @@
     if (Sync.conexao() === 'wifi') toast(msg + '.');
     else toast(msg + ' no celular. Para enviar, toque nas setas vermelhas lá em cima.', 5000);
   }
-  /** Diálogo com várias opções (cada uma vira um botão). Devolve o "valor" da escolhida. */
+  // ------------------------------------------------------------------
+  //  Diálogos: o "voltar" do Android fecha o diálogo (como "Cancelar").
+  //  Cada diálogo aberto ganha uma entrada no histórico; quando ele fecha
+  //  por um botão, o próprio app tira essa entrada.
+  // ------------------------------------------------------------------
+  let dialogoAberto = null; // { aoVoltar, entrada }
+  let popsPendentes = 0;    // "voltar" feitos pelo app para tirar a entrada de um diálogo
+  let aoTerminarPops = [];
+  function quandoHistoricoPronto(fn) {
+    if (popsPendentes) aoTerminarPops.push(fn); else fn();
+  }
+  function abrirDialogo(html, aoVoltar) {
+    $('dialogo').innerHTML = html;
+    const d = { aoVoltar, entrada: false };
+    dialogoAberto = d;
+    quandoHistoricoPronto(() => {
+      if (dialogoAberto !== d) return;
+      d.entrada = true;
+      history.pushState({ tela: telaAtual, dialogo: true }, '');
+    });
+  }
+  function fecharDialogo() {
+    $('dialogo').innerHTML = '';
+    const d = dialogoAberto;
+    dialogoAberto = null;
+    if (d && d.entrada) { popsPendentes++; history.back(); }
+  }
+  /** Chamado pelo "voltar": devolve true se o "voltar" era de um diálogo (e ele foi fechado). */
+  function voltarNoDialogo() {
+    if (popsPendentes > 0) {
+      popsPendentes--;
+      if (!popsPendentes) { const fila = aoTerminarPops; aoTerminarPops = []; fila.forEach(f => f()); }
+      return true;
+    }
+    if (!dialogoAberto) return false;
+    const d = dialogoAberto;
+    dialogoAberto = null;
+    $('dialogo').innerHTML = '';
+    if (!d.entrada) history.pushState({ tela: telaAtual }, ''); // o "voltar" tirou a entrada da tela: devolve
+    d.aoVoltar();
+    return true;
+  }
+  /** Diálogo com várias opções (cada uma vira um botão). Devolve o "valor" da escolhida (null no "voltar"). */
   function escolher(msg, opcoes) {
     return new Promise((ok) => {
-      const raiz = $('dialogo');
-      raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p><div class="botoes coluna">` +
-        opcoes.map((o, i) => `<button class="botao ${o.classe || ''}" data-opcao="${i}">${esc(o.texto)}</button>`).join('') + '</div></div></div>';
-      raiz.querySelectorAll('[data-opcao]').forEach((b) => {
-        b.onclick = () => { raiz.innerHTML = ''; ok(opcoes[Number(b.dataset.opcao)].valor); };
+      abrirDialogo(`<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p><div class="botoes coluna">` +
+        opcoes.map((o, i) => `<button class="botao ${o.classe || ''}" data-opcao="${i}">${esc(o.texto)}</button>`).join('') + '</div></div></div>',
+      () => ok(null));
+      $('dialogo').querySelectorAll('[data-opcao]').forEach((b) => {
+        b.onclick = () => { fecharDialogo(); ok(opcoes[Number(b.dataset.opcao)].valor); };
       });
     });
   }
@@ -204,13 +255,12 @@
    */
   function dialogoCampos({ titulo, texto = '', campos, sim = 'Salvar', mostrarSenha = false, aoConfirmar }) {
     return new Promise((ok) => {
-      const raiz = $('dialogo');
-      raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo" role="dialog"><h2>${esc(titulo)}</h2>${texto ? `<p class="dica">${esc(texto)}</p>` : ''}` +
+      abrirDialogo(`<div class="fundo-dialogo"><div class="dialogo" role="dialog"><h2>${esc(titulo)}</h2>${texto ? `<p class="dica">${esc(texto)}</p>` : ''}` +
         campos.map(c => `<label for="${c.id}">${esc(c.rotulo)}</label><input id="${c.id}" type="${c.tipo || 'text'}"` +
           `${c.inputmode ? ` inputmode="${c.inputmode}"` : ''} autocomplete="${c.autocomplete || 'off'}" placeholder="${esc(c.placeholder || '')}" value="${esc(c.valor || '')}">`).join('') +
         (mostrarSenha ? '<label class="marcar"><input type="checkbox" id="dlg-mostrar"> Mostrar senha</label>' : '') +
         `<p class="erro" id="dlg-erro"></p><div class="botoes"><button class="botao" id="dlg-nao">Cancelar</button>` +
-        `<button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`;
+        `<button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`, () => ok(false));
       campos.forEach((c) => {
         if (c.mascaraZap) mascaraZap($(c.id));
         $(c.id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('dlg-sim').click(); } });
@@ -218,7 +268,7 @@
       if (mostrarSenha) {
         $('dlg-mostrar').onchange = () => campos.forEach((c) => { if (c.tipo === 'password' || c.senha) { c.senha = true; $(c.id).type = $('dlg-mostrar').checked ? 'text' : 'password'; } });
       }
-      $('dlg-nao').onclick = () => { raiz.innerHTML = ''; ok(false); };
+      $('dlg-nao').onclick = () => { fecharDialogo(); ok(false); };
       $('dlg-sim').onclick = async () => {
         const valores = {};
         campos.forEach((c) => { valores[c.id] = $(c.id).value; });
@@ -228,7 +278,7 @@
         if (!$('dlg-sim')) return;
         $('dlg-sim').disabled = false;
         if (erro) { $('dlg-erro').textContent = erro; return; }
-        raiz.innerHTML = '';
+        fecharDialogo();
         ok(true);
       };
       setTimeout(() => { const f = $(campos[0].id); if (f) f.focus(); }, 50);
@@ -236,10 +286,10 @@
   }
   function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
     return new Promise((ok) => {
-      const raiz = $('dialogo');
-      raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p>
-        <div class="botoes"><button class="botao" id="dlg-nao">${esc(nao)}</button><button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`;
-      const fim = (r) => { raiz.innerHTML = ''; ok(r); };
+      abrirDialogo(`<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p>
+        <div class="botoes"><button class="botao" id="dlg-nao">${esc(nao)}</button><button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`,
+      () => ok(false));
+      const fim = (r) => { fecharDialogo(); ok(r); };
       $('dlg-nao').onclick = () => fim(false);
       $('dlg-sim').onclick = () => fim(true);
     });
@@ -273,12 +323,13 @@
     return (e && e.message) || 'Algo deu errado. Tente de novo.';
   }
   function abrirNovidades() {
-    const raiz = $('dialogo');
     const blocos = NOVIDADES.map((v, i) => `<div class="${i === 0 ? 'atual' : ''}"><h4>${esc(v.titulo)}${i === 0 ? ' <small>(esta versão)</small>' : ''}</h4>` +
       `<ul>${v.itens.map(t => `<li>${t}</li>`).join('')}</ul></div>`).join('');
-    raiz.innerHTML = `<div class="fundo-dialogo"><div class="dialogo novidades" role="dialog" aria-label="O que há de novo"><h2>✨ O que há de novo</h2>${blocos}` +
-      '<div class="botoes"><button class="botao primario" id="nov-ok">Entendi</button></div></div></div>';
-    $('nov-ok').onclick = () => { raiz.innerHTML = ''; };
+    abrirDialogo(`<div class="fundo-dialogo" id="nov-fundo"><div class="dialogo novidades" role="dialog" aria-label="O que há de novo"><h2>✨ O que há de novo</h2>${blocos}` +
+      '<div class="botoes"><button class="botao primario" id="nov-ok">Entendi</button></div></div></div>', () => { /* só fecha */ });
+    $('nov-ok').onclick = () => fecharDialogo();
+    // tocar fora da caixa também fecha
+    $('nov-fundo').addEventListener('click', (e) => { if (e.target === e.currentTarget) fecharDialogo(); });
   }
 
   // ------------------------------------------------------------------
@@ -315,7 +366,7 @@
     $('tela-' + nome).classList.remove('oculto');
     telaAtual = nome;
     window.scrollTo(0, 0);
-    if (empilhar) history.pushState({ tela: nome }, '');
+    if (empilhar) quandoHistoricoPronto(() => history.pushState({ tela: nome }, ''));
   }
   async function podeSairDaTela() {
     if (telaAtual === 'form' && Form.alterado) {
@@ -334,6 +385,13 @@
     return true;
   }
   window.addEventListener('popstate', async () => {
+    if (voltarNoDialogo()) return;
+    if (Visor.aberto()) {
+      // "voltar" com uma foto aberta em tela cheia: só fecha a foto
+      Visor.fechar();
+      history.pushState({ tela: telaAtual }, '');
+      return;
+    }
     if (Camera.aberta()) {
       // "voltar" com a câmera aberta: só fecha a câmera
       Camera.cancelar();
@@ -349,11 +407,13 @@
     if (telaAtual === 'senha') { mostrarTela('boas-vindas', { empilhar: false }); return; }
     if (['inicio', 'boas-vindas', 'whatsapp', 'removido'].includes(telaAtual)) return;
     if (await podeSairDaTela()) exibirInicio();
-    else history.pushState({ tela: telaAtual }, '');
+    else quandoHistoricoPronto(() => history.pushState({ tela: telaAtual }, '')); // depois que a pergunta sair do histórico
   });
   function voltar() {
-    if (history.state && history.state.tela) history.back();
-    else exibirInicio();
+    quandoHistoricoPronto(() => {
+      if (history.state && history.state.tela) history.back();
+      else exibirInicio();
+    });
   }
   function concluirEVoltar() {
     Form.alterado = false;
@@ -432,9 +492,37 @@
     $('bv-chrome').innerHTML = mostrarAvisoChrome() ? avisoChromeHtml($('bv-codigo').value.trim(), 'aviso-chrome') : '';
   }
 
+  // ------------------------------------------------------------------
+  //  Código do grupo: vem no link de convite (?codigo=...) e fica guardado no celular.
+  //  Só aparece para digitar se o app não souber o código ou se o servidor recusar.
+  // ------------------------------------------------------------------
+  async function guardarCodigoDoLink() {
+    const params = new URLSearchParams(location.search);
+    const codigo = (params.get('codigo') || '').trim();
+    if (!codigo) return;
+    await Banco.gravarConfig('codigoGrupo', codigo);
+    const p = await Perfil.obter();
+    if (p && p.codigo !== codigo) {
+      p.codigo = codigo;
+      p.codigoInvalido = false;
+      await Perfil.salvar(p);
+    }
+    // tira o código da barra de endereço (ele já está guardado)
+    params.delete('codigo');
+    const resto = params.toString();
+    try { history.replaceState(history.state, '', location.pathname + (resto ? '?' + resto : '') + location.hash); } catch (e) { /* opcional */ }
+  }
+  async function codigoConhecido() {
+    const p = await Perfil.obter();
+    return String((await Banco.lerConfig('codigoGrupo', '')) || (p && p.codigo) || '').trim();
+  }
+  function mostrarCampoCodigo(bloco, campo, focar) {
+    $(bloco).classList.remove('oculto');
+    if (focar) setTimeout(() => { $(campo).focus(); $(campo).select(); }, 50);
+  }
+
   async function iniciarBoasVindas(motivo = 'novo') {
     const p = await Perfil.obter();
-    const params = new URLSearchParams(location.search);
     $('bv-intro').textContent = INTRO[motivo] || INTRO.novo;
     $('bv-nome').value = motivo === 'migracao' ? (p.nomeServidor || p.nome || '') : motivo === 'sessao' ? (p.nome || '') : '';
     $('bv-senha').value = '';
@@ -443,7 +531,9 @@
     $('bv-mostrar').checked = false;
     $('bv-senha').type = 'password';
     $('bv-senha2').type = 'password';
-    $('bv-codigo').value = params.get('codigo') || (p && p.codigo) || '';
+    const codigo = await codigoConhecido();
+    $('bv-codigo').value = codigo;
+    $('bv-bloco-codigo').classList.toggle('oculto', !!codigo);
     modoConta(motivo === 'sessao' || motivo === 'saiu' ? 'entrar' : 'criar');
     renderAvisoChromeBoasVindas();
     mostrarTela('boas-vindas', { empilhar: false });
@@ -451,7 +541,7 @@
 
   function mensagemErroConta(e) {
     if (e instanceof Api.ErroRede) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
-    if (e.codigo === 'codigo_invalido') return 'Código do grupo inválido. Confira com o organizador.';
+    if (e.codigo === 'codigo_invalido') return 'O código do grupo não confere. Digite o código que está no link do app (ou peça ao organizador).';
     if (e.codigo === 'senha_incorreta') return 'Senha incorreta. Se esqueceu, toque em “Esqueci minha senha”.';
     if (e.codigo === 'acao_desconhecida') return 'O servidor ainda está na versão antiga. Avise o organizador para atualizar o código no Apps Script.';
     return e.message;
@@ -468,7 +558,10 @@
     if (senha.length < 4) return erro(criar ? 'A senha precisa ter pelo menos 4 caracteres.' : 'Digite sua senha.');
     if (criar && senha !== $('bv-senha2').value) return erro('As duas senhas não estão iguais.');
     if (criar && !zapValido($('bv-zap').value)) return erro('Informe seu WhatsApp com DDD (ex.: (83) 99999-8888).');
-    if (!codigo) return erro('Informe o código do grupo.');
+    if (!codigo) {
+      mostrarCampoCodigo('bv-bloco-codigo', 'bv-codigo', true);
+      return erro('Informe o código do grupo. Ele vem no link do app que o organizador mandou.');
+    }
     if (!Api.urlConfigurada()) return erro('O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).');
     if (!navigator.onLine) return erro('Sem internet. Para criar a conta ou entrar, o celular precisa estar conectado.');
 
@@ -485,6 +578,7 @@
       await concluirEntrada(r, anterior, temp);
     } catch (e) {
       erro(mensagemErroConta(e));
+      if (e.codigo === 'codigo_invalido') mostrarCampoCodigo('bv-bloco-codigo', 'bv-codigo', true);
     } finally {
       botao.disabled = false;
       botao.textContent = criar ? 'Criar conta' : 'Entrar';
@@ -513,6 +607,7 @@
       }
       await limparDadosLocais();
     }
+    await Banco.gravarConfig('codigoGrupo', temp.codigo);
     await Perfil.salvar({
       aparelhoId: temp.aparelhoId, codigo: temp.codigo, token: r.token, contaId: r.conta.id, nome: r.conta.nome,
       criadoEm: (anterior && anterior.criadoEm) || Date.now(), entrouEm: Date.now(),
@@ -551,6 +646,7 @@
   function abrirEsqueci() {
     $('es-nome').value = normalizarNome($('bv-nome').value);
     $('es-grupo').value = $('bv-codigo').value.trim();
+    $('es-bloco-grupo').classList.toggle('oculto', !!$('es-grupo').value);
     $('es-passo1').classList.remove('oculto');
     $('es-passo2').classList.add('oculto');
     ['es-cod', 'es-senha', 'es-senha2'].forEach((id) => { $(id).value = ''; });
@@ -576,7 +672,10 @@
     const grupo = $('es-grupo').value.trim();
     erroEsqueci('');
     if (!nomeValido(nome)) return erroEsqueci('Informe o nome e sobrenome da sua conta.');
-    if (!grupo) return erroEsqueci('Informe o código do grupo.');
+    if (!grupo) {
+      mostrarCampoCodigo('es-bloco-grupo', 'es-grupo', true);
+      return erroEsqueci('Informe o código do grupo. Ele vem no link do app que o organizador mandou.');
+    }
     if (!Api.urlConfigurada()) return erroEsqueci('O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).');
     if (!navigator.onLine) return erroEsqueci('Sem internet. Conecte o celular para pedir o código.');
     const { aparelhoId } = await aparelhoParaConta();
@@ -595,7 +694,12 @@
       renderContatoOrganizador(r.organizador, nome);
       setTimeout(() => $('es-cod').focus(), 50);
     } catch (e) {
-      erroEsqueci(e.codigo === 'codigo_invalido' ? 'Código do grupo inválido. Confira com o organizador.' : mensagemErroGeral(e));
+      if (e.codigo === 'codigo_invalido') {
+        mostrarCampoCodigo('es-bloco-grupo', 'es-grupo', true);
+        erroEsqueci('O código do grupo não confere. Digite o código que está no link do app (ou peça ao organizador).');
+      } else {
+        erroEsqueci(mensagemErroGeral(e));
+      }
       if (e.dados && e.dados.organizador !== undefined) renderContatoOrganizador(e.dados.organizador, nome);
     } finally {
       botao.disabled = false;
@@ -763,7 +867,7 @@
   async function renderAlertas(lancs, perfil) {
     const html = [];
     if (!Api.urlConfigurada()) html.push(alerta('vermelho', 'O app ainda não tem o endereço do servidor. Avise o organizador (arquivo config.js).'));
-    if (perfil.codigoInvalido) html.push(alerta('vermelho', 'Código do grupo inválido. Corrija nas configurações.', 'Corrigir', 'abrir-config'));
+    if (perfil.codigoInvalido) html.push(alerta('vermelho', 'O código do grupo mudou. Peça ao organizador o link novo do app e abra-o neste celular.'));
     if (swEsperando) html.push(alerta('azul', 'Há uma nova versão do app.', 'Atualizar', 'atualizar-app'));
     // organizador: pedidos de senha nova (manda o código pelo WhatsApp da pessoa)
     const vistos = await Banco.lerConfig('pedidosVistos', []);
@@ -886,8 +990,35 @@
     }
   });
 
+  // Setas de sincronização: tocar sincroniza (se já estão girando, mostra "Sincronizando…" por 5 s);
+  // tocar e segurar mostra a situação atual por 5 s.
+  let seguraRelogio = null;
+  let segurou = false;
+  async function mostrarSituacaoSync() {
+    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 5000); return; }
+    const n = await Sync.pendentes();
+    const ultima = await Banco.lerConfig('ultimaSync', 0);
+    const erro = await Banco.lerConfig('ultimoErro', null);
+    const falhou = !!(erro && erro.quando && erro.quando >= (ultima || 0));
+    const semInternet = Sync.conexao() === 'offline' ? ' · sem internet' : '';
+    if (n > 0) rotulo(plural(n, '1 lançamento para enviar', '# lançamentos para enviar') + semInternet, 'vermelho', 5000);
+    else if (falhou || !ultima) rotulo('Não sincronizado' + semInternet, 'vermelho', 5000);
+    else rotulo('Sincronizado', 'verde', 5000);
+  }
+  $('btn-sync').addEventListener('pointerdown', () => {
+    segurou = false;
+    clearTimeout(seguraRelogio);
+    seguraRelogio = setTimeout(() => { segurou = true; mostrarSituacaoSync(); }, 500);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => $('btn-sync').addEventListener(ev, () => clearTimeout(seguraRelogio)));
+  $('btn-sync').addEventListener('contextmenu', (e) => {
+    // no Android, segurar o dedo também gera este evento: vale como "tocar e segurar"
+    e.preventDefault();
+    if (!segurou) { segurou = true; clearTimeout(seguraRelogio); mostrarSituacaoSync(); }
+  });
   $('btn-sync').onclick = () => {
-    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo'); return; }
+    if (segurou) { segurou = false; return; } // foi "tocar e segurar": só mostra a situação
+    if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 5000); return; }
     Sync.sincronizar({ manual: true });
   };
   $('btn-voz').onclick = () => abrirVoz();
@@ -964,9 +1095,13 @@
     if (l.origem === 'foto') { renderCaixaNota(); return; }
     if (l.origem !== 'voz') { el.innerHTML = ''; return; }
     const audio = (await Banco.porIndice('arquivos', 'lancamentoId', l.id)).find(a => a.tipo === 'audio');
-    const player = audio && audio.blob
-      ? `<audio controls src="${urlDe(audio.blob)}"></audio>`
-      : '<div class="dica">O áudio está guardado no Drive do organizador.</div>';
+    const baixado = audio && !audio.blob ? baixados.get(audio.id) : null;
+    const player = audio && (audio.blob || baixado)
+      ? `<audio controls src="${urlDe(audio.blob || baixado)}"></audio>`
+      : audio && audio.enviado
+        ? `<div class="ouvir-audio" id="f-ouvir-caixa"><button class="botao pequeno" type="button" id="f-ouvir" data-arquivo="${esc(audio.id)}">▶️ Ouvir o áudio</button>` +
+          '<small class="dica">O áudio está guardado no servidor (precisa de internet).</small></div>'
+        : '<div class="dica">O áudio está guardado no Drive do organizador.</div>';
     let classe = '';
     let msg = '';
     if (l.status === 'aguardando_ia') {
@@ -984,6 +1119,21 @@
     const obs = l.observacaoIA ? `<div class="dica">${esc(l.observacaoIA)}</div>` : '';
     el.innerHTML = `<div class="caixa-ia ${classe}">${msg}${transc}${obs}${player}</div>`;
   }
+
+  $('form-ia').addEventListener('click', async (e) => {
+    const b = e.target.closest('#f-ouvir');
+    if (!b) return;
+    b.disabled = true;
+    b.textContent = 'Baixando o áudio…';
+    try {
+      const blob = await baixarArquivo(b.dataset.arquivo);
+      const caixa = $('f-ouvir-caixa');
+      if (caixa) caixa.innerHTML = `<audio controls autoplay src="${urlDe(blob)}"></audio>`;
+    } catch (err) {
+      toast(erroAoBaixar(err, 'o áudio'), 5000);
+      if (document.body.contains(b)) { b.disabled = false; b.textContent = '▶️ Ouvir o áudio'; }
+    }
+  });
 
   function renderCaixaNota() {
     const l = Form.l;
@@ -1051,19 +1201,67 @@
   $('tela-form').addEventListener('change', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
 
   function miniatura(blob, chave) {
-    const conteudo = blob ? `<img src="${urlDe(blob)}" alt="foto">` : '<div class="sem-arquivo">Foto guardada no Drive</div>';
-    return `<div class="foto">${conteudo}<button class="remover" type="button" data-remover="${esc(chave)}" aria-label="Remover foto">✕</button></div>`;
+    const conteudo = blob ? `<img src="${urlDe(blob)}" alt="foto">` : '<div class="sem-arquivo">☁️ Foto guardada no servidor<b>Toque para ver</b></div>';
+    return `<div class="foto" data-ver="${esc(chave)}" role="button" aria-label="Ver a foto">${conteudo}` +
+      `<button class="remover" type="button" data-remover="${esc(chave)}" aria-label="Remover foto">✕</button></div>`;
+  }
+
+  // ------------------------------------------------------------------
+  //  Ver as fotos em tela cheia (e baixar do servidor as que já saíram do celular)
+  // ------------------------------------------------------------------
+  const listasVisor = {}; // id da lista na tela -> [{ chave, blob, arquivoId }]
+  const baixados = new Map(); // arquivos baixados nesta sessão (não são gravados de volta no celular)
+  async function base64ParaBlob(base64, mime) {
+    try {
+      return await (await fetch(`data:${mime};base64,${base64}`)).blob();
+    } catch (e) {
+      const bin = atob(base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+  }
+  async function baixarArquivo(arquivoId) {
+    if (baixados.has(arquivoId)) return baixados.get(arquivoId);
+    if (!navigator.onLine) throw new Api.ErroRede('Sem internet.');
+    const r = await Api.chamar('baixarArquivo', { arquivoId }, { tempoMs: 90000 });
+    const blob = await base64ParaBlob(r.base64, r.mime || 'application/octet-stream');
+    baixados.set(arquivoId, blob);
+    return blob;
+  }
+  function erroAoBaixar(e, oque = 'a foto') {
+    if (e instanceof Api.ErroRede) return `Sem internet para baixar ${oque}. Ela continua guardada no servidor: tente de novo quando estiver conectado.`;
+    return mensagemErroGeral(e);
+  }
+  function abrirVisor(lista, chave) {
+    const itens = listasVisor[lista] || [];
+    const i = itens.findIndex(x => x.chave === chave);
+    if (i < 0) return;
+    Visor.abrir(itens.map(x => ({ blob: x.blob, arquivoId: x.arquivoId })), i, {
+      baixar: (item) => baixarArquivo(item.arquivoId),
+      mensagemErro: (e) => erroAoBaixar(e)
+    });
+  }
+  /** Toque na miniatura: abre a foto. Toque no "✕": devolve a chave para remover. */
+  function toqueNaMiniatura(e, lista) {
+    const b = e.target.closest('[data-remover]');
+    if (b) return b.dataset.remover;
+    const f = e.target.closest('[data-ver]');
+    if (f) abrirVisor(lista, f.dataset.ver);
+    return null;
   }
   async function renderFotosForm() {
     const existentes = Form.modo === 'novo' ? [] : (await Banco.porIndice('arquivos', 'lancamentoId', Form.l.id))
       .filter(a => a.tipo === 'foto' && !a.remover && !Form.removerIds.includes(a.id));
     const html = existentes.map(a => miniatura(a.blob, 'e:' + a.id)).concat(Form.fotosNovas.map(f => miniatura(f.blob, 'n:' + f.id)));
+    listasVisor['f-fotos'] = existentes.map(a => ({ chave: 'e:' + a.id, blob: a.blob || null, arquivoId: a.id }))
+      .concat(Form.fotosNovas.map(f => ({ chave: 'n:' + f.id, blob: f.blob, arquivoId: '' })));
     $('f-fotos').innerHTML = html.join('') || '<small class="dica">Nenhuma foto.</small>';
   }
   $('f-fotos').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-remover]');
-    if (!b) return;
-    const [tipo, id] = b.dataset.remover.split(/:(.+)/);
+    const chave = toqueNaMiniatura(e, 'f-fotos');
+    if (!chave) return;
+    const [tipo, id] = chave.split(/:(.+)/);
     if (tipo === 'e') Form.removerIds.push(id);
     else Form.fotosNovas = Form.fotosNovas.filter(f => f.id !== id);
     Form.alterado = true;
@@ -1268,12 +1466,13 @@
   $('voz-regravar').onclick = () => $('voz-mic').click();
 
   function renderFotosVoz() {
+    listasVisor['voz-fotos'] = Voz.fotos.map(f => ({ chave: 'n:' + f.id, blob: f.blob, arquivoId: '' }));
     $('voz-fotos').innerHTML = Voz.fotos.map(f => miniatura(f.blob, 'n:' + f.id)).join('') || '<small class="dica">Nenhuma foto.</small>';
   }
   $('voz-fotos').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-remover]');
-    if (!b) return;
-    const id = b.dataset.remover.split(/:(.+)/)[1];
+    const chave = toqueNaMiniatura(e, 'voz-fotos');
+    if (!chave) return;
+    const id = chave.split(/:(.+)/)[1];
     Voz.fotos = Voz.fotos.filter(f => f.id !== id);
     renderFotosVoz();
   });
@@ -1328,6 +1527,7 @@
     return f ? f.qr : '';
   }
   function renderFotoNota() {
+    listasVisor['foto-lista'] = Foto.fotos.map(f => ({ chave: 'n:' + f.id, blob: f.blob, arquivoId: '' }));
     $('foto-lista').innerHTML = Foto.fotos.map(f => miniatura(f.blob, 'n:' + f.id)).join('') || '<small class="dica">Nenhuma foto ainda.</small>';
     const qr = qrDaNota();
     const el = $('foto-qr');
@@ -1335,7 +1535,7 @@
     el.textContent = !Foto.fotos.length ? ''
       : qr ? '✓ QR Code da nota encontrado: os dados virão do site da SEFAZ.'
         : 'QR Code não encontrado nas fotos: a IA vai ler a nota.';
-    $('foto-camera').textContent = Foto.fotos.length ? '📷 Tirar mais uma foto desta nota' : '📷 Tirar foto';
+    $('foto-camera-texto').textContent = Foto.fotos.length ? 'Tirar mais uma foto' : 'Tirar foto';
     $('foto-salvar').disabled = !Foto.fotos.length;
   }
   async function tirarFotoNota() {
@@ -1355,14 +1555,14 @@
     renderFotoNota();
     mostrarTela('foto');
     obterLocalizacao().then(pos => { if (Foto.token === token) Foto.gps = pos; });
-    tirarFotoNota(); // já abre a câmera
+    // a pessoa escolhe: "Tirar foto" (câmera) ou "Galeria"
   }
   $('foto-camera').onclick = () => tirarFotoNota();
   $('foto-galeria').onchange = async (e) => { if (await adicionarFotos(e.target, Foto.fotos, OPCOES_NOTA)) renderFotoNota(); };
   $('foto-lista').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-remover]');
-    if (!b) return;
-    const id = b.dataset.remover.split(/:(.+)/)[1];
+    const chave = toqueNaMiniatura(e, 'foto-lista');
+    if (!chave) return;
+    const id = chave.split(/:(.+)/)[1];
     Foto.fotos = Foto.fotos.filter(f => f.id !== id);
     renderFotoNota();
   });
@@ -1403,36 +1603,15 @@
   // ------------------------------------------------------------------
   //  Configurações
   // ------------------------------------------------------------------
-  const SVG_OLHO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
-  const SVG_OLHO_CORTADO = $('cfg-olho').innerHTML;
-
   function renderConta(p) {
     $('cfg-conta').innerHTML = `<b>${esc(p.nome)}</b><small>Conta conectada neste celular</small>` +
       `<small>WhatsApp: ${p.whatsapp ? esc(formatarZap(p.whatsapp)) : 'não cadastrado'}</small>`;
   }
-  /** O código do grupo fica embaçado; o olho no fim do campo mostra (e só então dá para salvar). */
-  function esconderCodigo(esconder) {
-    const campo = $('cfg-codigo');
-    campo.classList.toggle('embacado', esconder);
-    campo.readOnly = esconder;
-    $('cfg-salvar').disabled = esconder;
-    const olho = $('cfg-olho');
-    olho.innerHTML = esconder ? SVG_OLHO_CORTADO : SVG_OLHO;
-    olho.setAttribute('aria-label', esconder ? 'Mostrar o código' : 'Esconder o código');
-    olho.title = esconder ? 'Mostrar o código' : 'Esconder o código';
-  }
-  $('cfg-olho').onclick = () => {
-    const mostrar = $('cfg-codigo').classList.contains('embacado');
-    esconderCodigo(!mostrar);
-    if (mostrar) $('cfg-codigo').focus();
-  };
 
   async function abrirConfig() {
     const p = await Perfil.obter();
     if (!p || !p.token) { iniciarBoasVindas(motivoEntrada(p)); return; }
     renderConta(p);
-    $('cfg-codigo').value = p.codigo;
-    esconderCodigo(true);
     $('cfg-camera-sistema').checked = prefCameraSistema;
     mostrarTela('config');
     await renderInfo();
@@ -1510,22 +1689,54 @@
     $('cfg-info').innerHTML = itens.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   }
 
-  $('cfg-salvar').onclick = async () => {
-    if ($('cfg-codigo').classList.contains('embacado')) return; // só salva com o código à mostra
-    const codigo = $('cfg-codigo').value.trim();
-    if (!codigo) { toast('Informe o código do grupo.'); return; }
-    const p = await Perfil.obter();
-    if (codigo === p.codigo && !p.codigoInvalido) { toast('Nada mudou.'); return; }
-    p.codigo = codigo;
-    p.codigoInvalido = false;
-    await Perfil.salvar(p);
-    if (Sync.conexao() === 'offline') { toast('Código salvo. Ele será conferido quando houver internet.'); return; }
-    toast('Conferindo o código…', 2000);
-    const r = await Sync.sincronizar({ somenteBaixar: true });
-    const atual = await Perfil.obter();
-    if (atual && atual.codigoInvalido) toast('Código do grupo inválido. Confira com o organizador.', 4500);
-    else if (r && !r.erro && !r.ignorado) toast('Código salvo e conferido.');
-    else if (r && r.ignorado) toast('Código salvo.');
+  // "Limpar dados": apaga do celular as fotos e os áudios que já estão no servidor (os gastos ficam);
+  // os que ainda não foram enviados ficam até serem enviados e depois saem sozinhos
+  function tamanhoTexto(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1).replace('.', ',') + ' MB';
+    return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+  }
+  $('cfg-limpar').onclick = async () => {
+    const arqs = (await Banco.todos('arquivos')).filter(a => a.blob && !a.remover);
+    const enviados = arqs.filter(a => a.enviado);
+    const pendentes = arqs.filter(a => !a.enviado && !a.limparAoEnviar);
+    if (!enviados.length && !pendentes.length) {
+      toast(arqs.length
+        ? 'As fotos e os áudios que faltam enviar já vão sair do celular assim que forem enviados.'
+        : 'Não há fotos nem áudios guardados neste celular.', 4500);
+      return;
+    }
+    const bytes = enviados.reduce((t, a) => t + ((a.blob && a.blob.size) || 0), 0);
+    const fotos = enviados.filter(a => a.tipo === 'foto').length;
+    const audios = enviados.length - fotos;
+    const partes = [];
+    if (fotos) partes.push(plural(fotos, '1 foto', '# fotos'));
+    if (audios) partes.push(plural(audios, '1 áudio', '# áudios'));
+    let msg = enviados.length
+      ? `Apagar deste celular ${partes.join(' e ')} (${tamanhoTexto(bytes)}) que já ${enviados.length === 1 ? 'está' : 'estão'} no servidor? ` +
+        'Os gastos continuam aqui, e as fotos e os áudios continuam guardados no servidor.'
+      : 'Ainda não há fotos nem áudios enviados para apagar.';
+    if (pendentes.length) {
+      msg += ' ' + plural(pendentes.length,
+        '1 arquivo ainda não foi enviado: ele fica no celular até ser enviado e depois é apagado sozinho.',
+        '# arquivos ainda não foram enviados: eles ficam no celular até serem enviados e depois são apagados sozinhos.');
+    }
+    if (!(await confirmar(msg, 'Limpar', 'Cancelar'))) return;
+    let liberados = 0;
+    for (const a of enviados.concat(pendentes)) {
+      const atual = await Banco.obter('arquivos', a.id);
+      if (!atual || !atual.blob) continue;
+      if (atual.enviado) {
+        liberados += atual.blob.size || 0;
+        atual.blob = null;
+        atual.limpoEm = Date.now();
+      } else {
+        atual.limparAoEnviar = true;
+      }
+      await Banco.gravar('arquivos', atual);
+    }
+    toast(liberados
+      ? `Pronto: ${tamanhoTexto(liberados)} liberados.` + (pendentes.length ? ' O resto sai depois de enviado.' : '')
+      : 'Pronto: os arquivos saem do celular depois de enviados.', 4500);
     renderInfo();
   };
   $('cfg-sync').onclick = async () => {
@@ -1580,6 +1791,7 @@
     try { localStorage.clear(); sessionStorage.clear(); } catch (e) { /* segue */ }
     $('toast').classList.add('oculto');
     $('dialogo').innerHTML = '';
+    dialogoAberto = null;
     mostrarTela('removido', { empilhar: false });
   }
   $('cfg-remover').onclick = async () => {
@@ -1626,7 +1838,8 @@
   window.addEventListener('sync-estado', async (ev) => {
     const d = ev.detail;
     if (d.estado === 'sincronizando') {
-      if (d.visivel) rotulo('Sincronizando…', 'amarelo');
+      // as setas amarelas girando já mostram que está sincronizando (o texto só aparece se a pessoa tocar)
+      if ($('sync-rotulo').classList.contains('vermelho')) rotulo('');
       atualizarIconeSync();
       return;
     }
@@ -1744,6 +1957,7 @@
       document.body.innerHTML = `<p style="padding:24px">Não foi possível abrir o armazenamento do app: ${esc(e.message)}</p>`;
       return;
     }
+    try { await guardarCodigoDoLink(); } catch (e) { /* segue */ }
     try { await limparArquivosAntigos(); } catch (e) { /* não impede o uso */ }
     $('ini-versao').textContent = 'v' + VERSAO_DO_APP;
     prefCameraSistema = !!(await Banco.lerConfig('cameraSistema', false));

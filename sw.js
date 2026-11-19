@@ -2,7 +2,7 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v2';
+const VERSAO = 'gastos-v3';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const ARQUIVOS = [
   './qr-worker.js',
   './vendor/jsQR.js',
   './camera.js',
+  './visor.js',
   './recorte.js',
   './sincronizacao.js',
   './app.js',

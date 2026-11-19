@@ -154,6 +154,8 @@ const Sync = (() => {
       // servidor da versão 1.1 (ainda não atualizado): não sabe ler notas por foto
       const antigo = r.precisaWhatsapp === undefined;
       if (!!perfil.servidorAntigo !== antigo) { perfil.servidorAntigo = antigo; mudou = true; }
+      // sincronizou: o código do grupo não está atrapalhando (a partir da V3, quem já entrou não depende dele)
+      if (perfil.codigoInvalido) { perfil.codigoInvalido = false; mudou = true; }
       if (mudou) await Perfil.salvar(perfil);
     }
     if (r.listas && r.listas.categorias && r.listas.categorias.length) await Banco.gravarConfig('listas', r.listas);
@@ -233,6 +235,8 @@ const Sync = (() => {
             atual.enviado = true;
             atual.driveId = r.driveId;
             atual.enviadoEm = Date.now();
+            // "Limpar dados" foi usado antes de o arquivo subir: agora que está no servidor, sai do celular
+            if (atual.limparAoEnviar) { atual.blob = null; atual.limparAoEnviar = false; atual.limpoEm = Date.now(); }
             await Banco.gravar('arquivos', atual);
           }
           resumo.arquivos++;
@@ -275,7 +279,8 @@ const Sync = (() => {
       // 6) novidades do servidor (histórico da conta, outros celulares, IA, administrador, endereços, listas)
       const desde = (await Banco.lerConfig('desde', 0)) || 0;
       avisar('sincronizando', { manual, visivel, detalhe: desde ? 'Buscando novidades…' : 'Buscando seus lançamentos…' });
-      const r = await Api.chamar('atualizacoes', { desde }, { tempoMs: 60000 });
+      // o endereço do app vai junto: o painel do organizador monta o link de convite com ele
+      const r = await Api.chamar('atualizacoes', { desde, urlApp: location.origin + location.pathname }, { tempoMs: 60000 });
       await aplicarPerfilServidor(r);
       for (const s of r.lancamentos || []) {
         const res = await aplicarDoServidor(s);
