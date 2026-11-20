@@ -2,7 +2,7 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v7';
+const VERSAO = 'gastos-v8';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -21,6 +21,7 @@ const ARQUIVOS = [
   './sincronizacao.js',
   './veiculos.js',
   './relatorio.js',
+  './exportar.js',
   './melhorias.js',
   './vendor/html2canvas.min.js',
   './app.js',
@@ -38,7 +39,8 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then(chaves => Promise.all(chaves.filter(k => k !== VERSAO).map(k => caches.delete(k))))
+      // V8: apaga só as versões antigas deste app (o app do administrador tem o cache dele, 'admin-...')
+      .then(chaves => Promise.all(chaves.filter(k => k !== VERSAO && k.indexOf('gastos-') === 0).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

@@ -2094,7 +2094,11 @@ const Veiculos = (() => {
     ehTela, mostrar, podeSair, aoSincronizar, paraRevisar,
     abrirLista, paraInicio, resumoInicio, tipoNaTela, explicarAviso, ir,
     // usados pelo relatório (relatorio.js, V7)
-    _util: { veiculoAtivo, gastosDo, abrirCalendario, definirData },
+    _util: {
+      veiculoAtivo, gastosDo, abrirCalendario, definirData,
+      // V8 (planilha): o veículo é compartilhado (soma os gastos de todos)?
+      compartilhado: async (v, regs) => !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false)
+    },
     abrirRegistro: (id) => ir('v-registro', { registroId: id }),
     // usados nos testes
     _textoMascara: textoMascara, _normalizarPlaca: normalizarPlaca, _analisarKm: analisarKm,

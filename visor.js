@@ -36,7 +36,14 @@ const Visor = (() => {
     };
     $('visor').classList.remove('oculto');
     document.body.classList.add('sem-rolagem');
+    if (window.App && App.abrirCamada) App.abrirCamada('visor'); // V8: entrada própria no histórico
     mostrar(estado.i, 0);
+  }
+  /** Fechar pelo × (ou Esc): também tira a entrada do histórico (o "voltar" do celular usa só fechar()). */
+  function fecharPeloBotao() {
+    if (!estado) return;
+    fechar();
+    if (window.App && App.fecharCamada) App.fecharCamada();
   }
 
   function fechar() {
@@ -270,13 +277,13 @@ const Visor = (() => {
     p.addEventListener('pointercancel', soltar);
     img().addEventListener('load', () => { if (estado && estado.escala > 1.01) { limitar(); aplicar(false); } });
     $('visor').addEventListener('contextmenu', (ev) => ev.preventDefault());
-    $('visor-fechar').onclick = () => fechar();
+    $('visor-fechar').onclick = () => fecharPeloBotao();
     $('visor-ant').onclick = () => ir(-1);
     $('visor-prox').onclick = () => ir(1);
     window.addEventListener('resize', () => { if (estado) { limitar(); aplicar(false); } });
     document.addEventListener('keydown', (ev) => {
       if (!estado) return;
-      if (ev.key === 'Escape') fechar();
+      if (ev.key === 'Escape') fecharPeloBotao();
       if (ev.key === 'ArrowLeft') ir(-1);
       if (ev.key === 'ArrowRight') ir(1);
     });

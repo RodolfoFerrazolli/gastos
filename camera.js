@@ -60,6 +60,8 @@ const Camera = (() => {
     $('camera').classList.add('oculto');
     $('camera-foco').classList.add('oculto');
     document.body.classList.remove('sem-rolagem');
+    // V8: sem foto, tira a entrada do histórico; com foto, ela fica para o recorte que vem logo depois
+    if (!resultado && window.App && App.fecharCamada) App.fecharCamada();
     resolver(resultado || null);
   }
 
@@ -289,6 +291,7 @@ const Camera = (() => {
       $('camera-foco').classList.add('oculto');
       $('camera').classList.remove('oculto');
       document.body.classList.add('sem-rolagem');
+      if (window.App && App.abrirCamada) App.abrirCamada('camera'); // V8: entrada própria no histórico
       if (!suportada()) { mostrarErro(null); return; }
       ligar().catch((e) => { if (estado) { pararStream(); mostrarErro(e); } });
     });

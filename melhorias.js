@@ -57,7 +57,8 @@ const Melhorias = (() => {
     42: 'Relatório do veículo',
     43: 'Relatório: Gastos (lista)',
     44: 'Relatório: Gastos (gráfico)',
-    45: 'Relatório: Desempenho'
+    45: 'Relatório: Desempenho',
+    46: 'Exportar planilha do veículo'
   };
   const LISTA = { manutencao: 20, seguro: 23, ipva: 26, licenciamento: 28, multa: 30, outros: 32, galeria: 34 };
   const ITEM = { abastecimento: 19, manutencao: 21, seguro: 24, ipva: 27, licenciamento: 29, multa: 31, outros: 33, galeria: 35 };
@@ -75,6 +76,7 @@ const Melhorias = (() => {
   function telaAtual() {
     let num = 0;
     if (visivel('visor')) num = 8;
+    else if (document.querySelector('.dialogo.exportar')) num = 46; // V8
     else if (visivel('recorte')) num = 7;
     else if (visivel('camera')) num = 6;
     else {

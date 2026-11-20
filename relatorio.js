@@ -212,6 +212,151 @@ const Relatorio = (() => {
   }
 
   // ------------------------------------------------------------------
+  //  V8: dados da planilha exportada (as mesmas contas da tela).
+  //  O servidor só monta a planilha com o que vai daqui.
+  // ------------------------------------------------------------------
+  const NOME_PLANILHA = {
+    abastecimento: 'Abastecimento', manutencao: 'Manutenção', seguro: 'Seguro', ipva: 'IPVA',
+    licenciamento: 'Licenciamento', multa: 'Multa', outros: 'Outros'
+  };
+  const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  function dataLonga(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : ''; }
+  function linhasTexto(t) { return String(t || '').split('\n').map(s => s.trim()).filter(Boolean).join(' · '); }
+  function descricaoPlanilha(r) {
+    const nome = NOME_PLANILHA[r.tipo] || 'Outros';
+    if (r.tipo === 'abastecimento') {
+      return [r.combustivel, litros(r) ? num(r.litros, 3) + (r.combustivel === 'GNV' ? ' m³' : ' L') : '', r.tanqueCheio ? 'tanque cheio' : '']
+        .filter(Boolean).join(' · ') || nome;
+    }
+    if (r.tipo === 'seguro') {
+      return [r.seguradora || 'Seguro', r.apolice ? 'apólice ' + r.apolice : '', r.validade ? 'validade ' + dataLonga(r.validade) : '', linhasTexto(r.descricao)]
+        .filter(Boolean).join(' · ');
+    }
+    return linhasTexto(r.descricao) || nome;
+  }
+  /** Lista de meses (aaaa-mm) de "de" até "ate". */
+  function mesesEntre(de, ate) {
+    const out = [];
+    let a = Number(de.slice(0, 4));
+    let m = Number(de.slice(5, 7));
+    const fimA = Number(ate.slice(0, 4));
+    const fimM = Number(ate.slice(5, 7));
+    while ((a < fimA || (a === fimA && m <= fimM)) && out.length < 120) {
+      out.push(`${a}-${String(m).padStart(2, '0')}`);
+      m++;
+      if (m > 12) { m = 1; a++; }
+    }
+    return out;
+  }
+  /**
+   * Tudo o que a planilha mostra. info: { eu (nome de quem gera), compartilhado, agora (Date) }.
+   * Linhas em listas simples (o servidor confere cada coluna).
+   */
+  function dadosPlanilha(v, regs, de, ate, info = {}) {
+    const g = calcularGastos(regs, de, ate);
+    const d = calcularDesempenho(regs, de, ate);
+    const periodo = noPeriodo(regs, de, ate).sort(ordem);
+    const quem = (r) => {
+      const p = String(r.participante || '').trim();
+      return p || (r.meu === false ? '' : (info.eu || ''));
+    };
+    const precoDe = (r) => (Number(r.precoLitro) > 0 ? Number(r.precoLitro) : (valor(r) > 0 && litros(r) > 0 ? valor(r) / litros(r) : null));
+    const km = (r) => (temKm(r) ? Number(r.hodometro) : null);
+
+    const gastos = periodo.map(r => [r.data, NOME_PLANILHA[r.tipo] || 'Outros', descricaoPlanilha(r), r.local || '', km(r),
+      r.formaPagamento || '', quem(r), valor(r)]);
+    const abast = periodo.filter(r => r.tipo === 'abastecimento');
+    const abastecimentos = abast.map(r => [r.data, r.local || '', r.combustivel || '', litros(r) || null, precoDe(r), valor(r), km(r),
+      !!r.tanqueCheio, r.formaPagamento || '', quem(r)]);
+
+    // resumo
+    const kms = periodo.filter(r => (r.tipo === 'abastecimento' || r.tipo === 'manutencao') && temKm(r)).map(r => Number(r.hodometro));
+    const porTipo = Object.keys(NOME_PLANILHA).map((t) => {
+      const itens = periodo.filter(r => r.tipo === t);
+      return [NOME_PLANILHA[t], itens.length, Math.round(itens.reduce((s, r) => s + valor(r), 0) * 100) / 100];
+    });
+    const meses = mesesEntre(de, ate);
+    const totalMes = meses.map(m => periodo.filter(r => r.data.slice(0, 7) === m).reduce((s, r) => s + valor(r), 0));
+    const destaques = [];
+    const maior = periodo.reduce((m, r) => (valor(r) > (m ? valor(m) : 0) ? r : m), null);
+    if (maior) destaques.push(['Maior gasto', `${descricaoPlanilha(maior)} · ${brl(valor(maior))} (${dataLonga(maior.data)})`]);
+    if (meses.length >= 2) {
+      const i = totalMes.indexOf(Math.max(...totalMes));
+      if (totalMes[i] > 0) destaques.push(['Mês mais caro', `${mesLongo(meses[i])} · ${brl(totalMes[i])}`]);
+      destaques.push(['Gasto médio por mês', brl(g.total / meses.length)]);
+    }
+    if (d.tanques.length >= 2) {
+      const melhor = d.tanques.reduce((m, t) => (t.kml > m.kml ? t : m));
+      destaques.push(['Melhor tanque', `${num(melhor.kml, 1)} km/L · de ${dataLonga(melhor.de)} a ${dataLonga(melhor.ate)}`]);
+    }
+    const c = d.combustivel;
+    if (c.precoMedio != null) destaques.push(['Preço médio do litro', brl(c.precoMedio)]);
+    if (c.barato) destaques.push(['Litro mais barato', `R$ ${num(c.barato.precoLitro, 3)} · ${dataLonga(c.barato.data)}${c.barato.local ? ' · ' + c.barato.local : ''}`]);
+    if (c.caro && c.caro !== c.barato) destaques.push(['Litro mais caro', `R$ ${num(c.caro.precoLitro, 3)} · ${dataLonga(c.caro.data)}${c.caro.local ? ' · ' + c.caro.local : ''}`]);
+
+    // desempenho
+    const tanques = d.tanques.map((t) => {
+      const outrosT = d.tanques.filter(x => x !== t);
+      const media = outrosT.length ? outrosT.reduce((s, x) => s + x.km, 0) / outrosT.reduce((s, x) => s + x.litros, 0) : t.kml;
+      return [t.de, t.ate, t.km, t.litros, t.n, t.kml, t.valor, t.valor > 0 ? t.valor / t.km : null, d.tanques.length >= 2 && t.kml < media * QUEDA];
+    });
+    let conclusao = '';
+    const eg = d.etanolGasolina;
+    if (eg && eg.etanol.custoKm != null && eg.gasolina.custoKm != null && eg.etanol.custoKm !== eg.gasolina.custoKm) {
+      const barato = eg.etanol.custoKm < eg.gasolina.custoKm ? 'o etanol' : 'a gasolina';
+      const dif = Math.abs(eg.etanol.custoKm - eg.gasolina.custoKm) / Math.max(eg.etanol.custoKm, eg.gasolina.custoKm);
+      conclusao = `Neste veículo, ${barato} saiu ${dif < 0.1 ? 'um pouco ' : ''}mais ${barato === 'o etanol' ? 'barato' : 'barata'} por km.`;
+    }
+    const combustivel = abast.length ? [
+      ['Litros abastecidos', num(c.litros, 1) + ' L'],
+      ['Total em combustível', brl(c.total)],
+      ['Preço médio do litro', c.precoMedio != null ? brl(c.precoMedio) : '—']
+    ].concat(c.barato ? [['Mais barato', `R$ ${num(c.barato.precoLitro, 3)} · ${dataLonga(c.barato.data)}`]] : [])
+      .concat(c.caro ? [['Mais caro', `R$ ${num(c.caro.precoLitro, 3)} · ${dataLonga(c.caro.data)}`]] : []) : [];
+
+    // mês a mês: km pelo hodômetro (do último registro antes do mês até o último do mês)
+    const leituras = periodo.filter(r => (r.tipo === 'abastecimento' || r.tipo === 'manutencao') && temKm(r))
+      .map(r => ({ mes: r.data.slice(0, 7), km: Number(r.hodometro) }));
+    let anterior = null;
+    const kmMes = meses.map((m) => {
+      const doMes = leituras.filter(x => x.mes === m).map(x => x.km);
+      if (!doMes.length) return null;
+      const fim = Math.max(...doMes);
+      const ini = anterior != null ? anterior : Math.min(...doMes);
+      anterior = Math.max(fim, anterior != null ? anterior : fim);
+      return fim - ini > 0 ? fim - ini : null;
+    });
+    const somaMes = (f) => meses.map(m => Math.round(abast.filter(r => r.data.slice(0, 7) === m).reduce((s, r) => s + f(r), 0) * 1000) / 1000);
+
+    return {
+      modelo: v.modelo || '', placa: v.placa || '', de, ate, compartilhado: !!info.compartilhado,
+      geradoEm: (() => { const a = info.agora || new Date(); return `${String(a.getDate()).padStart(2, '0')}/${String(a.getMonth() + 1).padStart(2, '0')}/${a.getFullYear()} ${String(a.getHours()).padStart(2, '0')}:${String(a.getMinutes()).padStart(2, '0')}`; })(),
+      resumo: {
+        total: g.total, qtd: periodo.length,
+        kmRodados: d.kmRodados, kmIni: kms.length >= 2 ? Math.min(...kms) : null, kmFim: kms.length >= 2 ? Math.max(...kms) : null,
+        kmPorDia: d.kmPorDia != null ? Math.round(d.kmPorDia) : null,
+        consumo: d.consumo, nTanques: d.tanques.length,
+        consumoNota: d.consumo == null ? 'precisa de 2 abastecimentos com hodômetro' : d.aproximado ? 'média aproximada' : 'de tanque cheio a tanque cheio',
+        custoTotalKm: d.custoTotalKm, custoCombKm: d.custoCombKm,
+        porTipo, destaques
+      },
+      gastos, abastecimentos,
+      desempenho: {
+        combustivel, tanques,
+        tanqueAberto: d.tanqueAberto ? `Tanque em aberto desde ${dataLonga(d.tanqueAberto.desde)} (${plural(d.tanqueAberto.n, '1 abastecimento', '# abastecimentos')}): fecha no próximo tanque cheio.` : '',
+        aproximado: d.aproximado ? d.meses.map(m => [mesLongo(m.mes), m.km, m.litros, m.n, m.kml]) : [],
+        etanolGasolina: eg ? [['Etanol', eg.etanol.kml, eg.etanol.custoKm], ['Gasolina', eg.gasolina.kml, eg.gasolina.custoKm]] : [],
+        conclusao
+      },
+      meses: {
+        nomes: meses.map(m => `${MES_CURTO[Number(m.slice(5, 7)) - 1]}/${m.slice(2, 4)}`),
+        tipos: Object.keys(NOME_PLANILHA).map(t => [NOME_PLANILHA[t], meses.map(m => Math.round(periodo.filter(r => r.tipo === t && r.data.slice(0, 7) === m).reduce((s, r) => s + valor(r), 0) * 100) / 100)]),
+        km: kmMes, litros: somaMes(litros), combustivel: somaMes(valor)
+      }
+    };
+  }
+
+  // ------------------------------------------------------------------
   //  Telas
   // ------------------------------------------------------------------
   const R = { veiculoId: null, de: '', ate: '', aba: 'lista', abertos: new Set(), regs: [] };
@@ -441,6 +586,7 @@ const Relatorio = (() => {
 
   function ligar() {
     $('rl-opcoes').addEventListener('click', (e) => {
+      if (e.target.closest('#rl-exportar')) { Exportar.abrir((App().dadosTela() || {}).veiculoId); return; } // V8
       const b = e.target.closest('[data-rel]');
       if (!b) return;
       limpar(); // cada vez que abre, começa no período completo
@@ -495,6 +641,8 @@ const Relatorio = (() => {
 
   return {
     preparar, limpar, abaAtual: () => R.aba,
+    periodoAtual: () => (R.de ? { de: R.de, ate: R.ate } : null),
+    dadosPlanilha, mesesEntre,
     // usados nos testes
     calcularGastos, calcularDesempenho, periodoPadrao
   };

@@ -23,6 +23,11 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 8', itens: [
+      '📥 <b>Exportar planilha do veículo:</b> no <b>Relatório</b> do veículo, o botão <b>Exportar planilha</b> monta uma planilha caprichada com 5 abas: <b>Resumo</b> (totais e gráfico de para onde foi o dinheiro), <b>Gastos</b>, <b>Abastecimentos</b>, <b>Desempenho</b> (média por tanque, etanol x gasolina e gráfico do consumo) e <b>Mês a mês</b>. Você escolhe o período e o formato: <b>Excel</b>, <b>LibreOffice</b>, <b>Google Planilhas</b> (um link que vale por 30 dias) ou <b>PDF</b>. Num veículo compartilhado, todos podem exportar.',
+      '📤 <b>Mandar a planilha:</b> pelo celular (WhatsApp, Bluetooth, Drive…) ou por <b>e-mail</b>. O e-mail do seu cadastro já vem preenchido, mas dá para trocar (ou colocar mais de um) sem mudar o cadastro.',
+      '🔙 <b>Botão voltar do celular:</b> depois de abrir uma foto (ex.: o comprovante no fim do lançamento) e fechar com o voltar, o próximo voltar não fecha mais o app: volta para a tela anterior. Vale também para a câmera e o recorte da foto.'
+    ] },
     { titulo: 'Versão 7', itens: [
       '🏠 <b>Tela inicial nova:</b> os avisos, o <b>Hoje</b> e o <b>Total lançado</b>, o cartão <b>🧾 Lançamentos</b> e o cartão <b>🚗 Veículos</b>. Os botões <b>Voz</b>, <b>Foto</b> e <b>Texto</b> abrem direto (um toque só). Tocando no resto do cartão, abre a tela <b>Lançamentos</b>, com os mesmos 3 botões e o histórico completo (os gastos dos veículos continuam juntos). O botão <b>+</b> da tela inicial saiu.',
       '📊 <b>Relatório do veículo:</b> no <b>+</b> do veículo. <b>Gastos</b> mostra o período (do primeiro ao último gasto, dá para mudar) em lista (abastecimentos, manutenções e despesas, com o total de cada um) ou em gráfico: é só arrastar para o lado. <b>Desempenho</b> mostra os km rodados, o consumo médio, o custo por km, o combustível (preço médio, mais barato e mais caro), etanol x gasolina e a <b>média por tanque(s)</b>: tocando, aparecem os abastecimentos daquele trecho. Quem nunca enche o tanque vê a <b>média aproximada</b>, mês a mês. Num veículo compartilhado, o relatório soma os gastos de todos.',
@@ -274,6 +279,30 @@
     dialogoAberto = null;
     if (d && d.entrada) { popsPendentes++; history.back(); }
   }
+  // ------------------------------------------------------------------
+  //  V8: camadas de tela cheia (foto aberta, câmera, recorte). Cada uma ganha
+  //  uma entrada no histórico AO ABRIR (no toque da pessoa). O "voltar" do
+  //  celular tira essa entrada e só fecha a camada; fechando pelo botão da
+  //  tela, o próprio app tira a entrada. Antes, o app recolocava a entrada
+  //  da tela depois do "voltar", e o Chrome pulava essa entrada (criada sem
+  //  toque): o "voltar" seguinte fechava o app.
+  //  A câmera que tira a foto deixa a entrada para o recorte, que vem logo depois.
+  // ------------------------------------------------------------------
+  let camada = null; // { tipo }
+  function abrirCamada(tipo) {
+    // da câmera para o recorte ("Usar foto") e do recorte para a câmera ("Repetir foto"): a mesma entrada
+    if (camada && ((camada.tipo === 'camera' && tipo === 'recorte') || (camada.tipo === 'recorte' && tipo === 'camera'))) { camada.tipo = tipo; return; }
+    const c = { tipo };
+    camada = c;
+    const estado = Object.assign(estadoTela(), { camada: tipo });
+    quandoHistoricoPronto(() => { if (camada === c) history.pushState(estado, ''); });
+  }
+  function fecharCamada() {
+    if (!camada) return;
+    camada = null;
+    popsPendentes++;
+    history.back();
+  }
   /** Chamado pelo "voltar": devolve true se o "voltar" era de um diálogo (e ele foi fechado). */
   function voltarNoDialogo() {
     if (popsPendentes > 0) {
@@ -476,24 +505,15 @@
   }
   window.addEventListener('popstate', async () => {
     if (voltarNoDialogo()) return;
-    if (Visor.aberto()) {
-      // "voltar" com uma foto aberta em tela cheia: só fecha a foto
-      Visor.fechar();
-      history.pushState(estadoTela(), '');
-      return;
-    }
-    if (Camera.aberta()) {
-      // "voltar" com a câmera aberta: só fecha a câmera
-      Camera.cancelar();
-      history.pushState(estadoTela(), '');
-      return;
-    }
-    if (Recorte.aberto()) {
-      // "voltar" com a tela de recorte aberta: só fecha o recorte
-      Recorte.cancelar();
-      history.pushState(estadoTela(), '');
-      return;
-    }
+    // V8: o "voltar" tirou a entrada da camada (foto, câmera ou recorte): só fecha a camada.
+    // Sem entrada própria (não deveria acontecer), faz como antes: fecha e devolve a entrada da tela.
+    const tinhaCamada = !!camada;
+    camada = null;
+    const devolver = () => { if (!tinhaCamada) history.pushState(estadoTela(), ''); };
+    if (Visor.aberto()) { Visor.fechar(); devolver(); return; }      // foto aberta em tela cheia
+    if (Camera.aberta()) { Camera.cancelar(); devolver(); return; }  // câmera do app
+    if (Recorte.aberto()) { Recorte.cancelar(); devolver(); return; } // tela de recorte
+    if (tinhaCamada) return; // entrada que sobrou (ex.: a câmera fechou e o recorte não abriu): só some
     if (telaAtual === 'senha') { mostrarTela('boas-vindas', { empilhar: false }); return; }
     if (['inicio', 'boas-vindas', 'whatsapp', 'removido'].includes(telaAtual)) return;
     if (Veiculos.ehTela(telaAtual)) {
@@ -1534,6 +1554,7 @@
       try {
         r = await Recorte.abrir(arquivo, Object.assign({ repetir: true }, opcoes));
       } catch (e) {
+        fecharCamada(); // a entrada que a câmera deixou para o recorte
         toast('Não foi possível usar a foto: ' + e.message, 4500);
         return 0;
       }
@@ -2305,7 +2326,7 @@
     esc, brl, plural, toast, confirmar, escolher, abrirDialogo, fecharDialogo, menuMais, listas, preencherSelect,
     obterLocalizacao, mensagemErroGeral, miniatura, listasVisor, toqueNaMiniatura, baixarArquivo, erroAoBaixar,
     tirarFotos, adicionarFotos, fmtDuracao, urlDe, agendarSync, mostrarTela, voltar, exibirInicio, quandoHistoricoPronto,
-    chaveDia, ehDinheiro, normalizarEmail, dialogoCampos, mostrarDica,
+    chaveDia, ehDinheiro, normalizarEmail, dialogoCampos, mostrarDica, abrirCamada, fecharCamada,
     telaAtual: () => telaAtual,
     dadosTela: () => dadosTela
   };

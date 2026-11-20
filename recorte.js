@@ -102,6 +102,8 @@ const Recorte = (() => {
     canvas.width = canvas.height = 0;
     $('recorte').classList.add('oculto');
     document.body.classList.remove('sem-rolagem');
+    // V8: tira a entrada do histórico (no "Repetir foto" ela fica para a câmera, que abre de novo)
+    if (!(resultado && resultado.acao === 'repetir') && window.App && App.fecharCamada) App.fecharCamada();
     if (erro) rejeitar(erro);
     else resolver(resultado);
   }
@@ -123,6 +125,7 @@ const Recorte = (() => {
       $('recorte-usar').textContent = 'Usar foto';
       $('recorte').classList.remove('oculto');
       document.body.classList.add('sem-rolagem');
+      if (window.App && App.abrirCamada) App.abrirCamada('recorte'); // V8: entrada própria (ou a da câmera)
       requestAnimationFrame(desenhar);
     });
   }
