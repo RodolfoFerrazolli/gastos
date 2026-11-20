@@ -23,6 +23,15 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 6', itens: [
+      '🚗 <b>Gastos dos veículos na tela inicial:</b> agora eles aparecem junto com os outros lançamentos e entram no <b>Hoje</b> e no <b>Total lançado</b> (a Galeria fica de fora; num veículo compartilhado, só os que você lançou). Tocando no gasto, ele abre direto.',
+      '🔄 <b>Puxar a tela para baixo</b> atualiza (sincroniza) sem sair da tela em que você está e sem perder o que estiver digitado.',
+      '⛽ <b>Abastecimento com vários áudios e várias fotos:</b> cada áudio novo fica guardado (dá para ouvir e apagar cada um). O botão <b>📷 Fotos</b> serve para a nota, a bomba (valor do litro, litros e total) e o painel (hodômetro): a IA descobre qual é qual e lê tudo junto.',
+      '👆 <b>Tocar fora</b> fecha os avisos e os menus. As perguntas importantes (como “Salvar mesmo assim?”) continuam pedindo uma resposta.',
+      '🐞 <b>Avisar um problema ou dar uma ideia:</b> o ícone discreto no topo de cada tela grava um áudio (ou você escreve) e manda junto uma imagem da tela. Só o organizador vê.',
+      '📝 <b>Observação</b> no cadastro do veículo (até 1000 letras), para deixar um comentário (ex.: “Carro alugado para o passeio”).',
+      'ℹ️ <b>Informações do veículo:</b> o ícone ℹ️ na tela do veículo mostra tudo o que está cadastrado, inclusive para quem recebeu o compartilhamento.'
+    ] },
     { titulo: 'Versão 5', itens: [
       '👥 <b>Compartilhar veículo:</b> na tela do veículo, a engrenagem ⚙️ tem <b>Editar veículo</b> e <b>Compartilhar veículo</b>. Você informa o primeiro nome e o e-mail da pessoa e o veículo aparece na lista dela, com 👥. Ela vê tudo e lança gastos, mas só altera ou exclui o que ela mesma lançou. Você, que é o dono, pode tudo e tira a pessoa quando quiser. O extrato mostra quem lançou cada gasto.',
       '📧 <b>E-mail:</b> toda conta agora tem um e-mail (cada e-mail só pode estar em uma conta). Quem já tinha conta cadastra pelo aviso que aparece ao abrir o app ou nas Configurações.',
@@ -234,10 +243,19 @@
   function quandoHistoricoPronto(fn) {
     if (popsPendentes) aoTerminarPops.push(fn); else fn();
   }
-  function abrirDialogo(html, aoVoltar) {
+  /** fora: tocar fora da caixa fecha (vale como "cancelar"); só nos avisos e menus, nunca nas decisões importantes. */
+  function abrirDialogo(html, aoVoltar, { fora = false } = {}) {
     $('dialogo').innerHTML = html;
     const d = { aoVoltar, entrada: false };
     dialogoAberto = d;
+    const fundo = $('dialogo').firstElementChild;
+    if (fora && fundo) {
+      fundo.addEventListener('click', (e) => {
+        if (e.target !== e.currentTarget || dialogoAberto !== d) return;
+        fecharDialogo();
+        d.aoVoltar();
+      });
+    }
     quandoHistoricoPronto(() => {
       if (dialogoAberto !== d) return;
       d.entrada = true;
@@ -265,12 +283,15 @@
     d.aoVoltar();
     return true;
   }
-  /** Diálogo com várias opções (cada uma vira um botão). Devolve o "valor" da escolhida (null no "voltar"). */
-  function escolher(msg, opcoes) {
+  /**
+   * Diálogo com várias opções (cada uma vira um botão). Devolve o "valor" da escolhida (null no "voltar" ou tocando fora).
+   * importante: decisão que precisa de resposta (tocar fora não fecha).
+   */
+  function escolher(msg, opcoes, { importante = false } = {}) {
     return new Promise((ok) => {
       abrirDialogo(`<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p><div class="botoes coluna">` +
         opcoes.map((o, i) => `<button class="botao ${o.classe || ''}" data-opcao="${i}">${esc(o.texto)}</button>`).join('') + '</div></div></div>',
-      () => ok(null));
+      () => ok(null), { fora: !importante });
       $('dialogo').querySelectorAll('[data-opcao]').forEach((b) => {
         b.onclick = () => { fecharDialogo(); ok(opcoes[Number(b.dataset.opcao)].valor); };
       });
@@ -386,10 +407,8 @@
     const blocos = NOVIDADES.map((v, i) => `<div class="${i === 0 ? 'atual' : ''}"><h4>${esc(v.titulo)}${i === 0 ? ' <small>(esta versão)</small>' : ''}</h4>` +
       `<ul>${v.itens.map(t => `<li>${t}</li>`).join('')}</ul></div>`).join('');
     abrirDialogo(`<div class="fundo-dialogo" id="nov-fundo"><div class="dialogo novidades" role="dialog" aria-label="O que há de novo"><h2>✨ O que há de novo</h2>${blocos}` +
-      '<div class="botoes"><button class="botao primario" id="nov-ok">Entendi</button></div></div></div>', () => { /* só fecha */ });
+      '<div class="botoes"><button class="botao primario" id="nov-ok">Entendi</button></div></div></div>', () => { /* só fecha */ }, { fora: true });
     $('nov-ok').onclick = () => fecharDialogo();
-    // tocar fora da caixa também fecha
-    $('nov-fundo').addEventListener('click', (e) => { if (e.target === e.currentTarget) fecharDialogo(); });
   }
 
   // ------------------------------------------------------------------
@@ -923,21 +942,27 @@
       if (!a.remover) (porLanc[a.lancamentoId] = porLanc[a.lancamentoId] || []).push(a);
     });
 
-    const hoje = chaveDia(Date.now());
-    const comValor = lancs.filter(l => l.valorTotal != null);
-    const totalHoje = comValor.filter(l => chaveDia(l.dataHora) === hoje).reduce((s, l) => s + Number(l.valorTotal), 0);
-    const total = comValor.reduce((s, l) => s + Number(l.valorTotal), 0);
-    $('totais').innerHTML = `<div><small>Hoje</small> <b>${brl(totalHoje)}</b></div><div><small>Total lançado</small> <b>${brl(total)}</b></div>`;
+    // V6: os gastos dos veículos (os que a pessoa lançou; menos a Galeria) entram na lista e nos totais
+    const doVeiculo = await Veiculos.paraInicio();
+    const itens = lancs.map(l => ({ quando: l.dataHora || 0, valor: l.valorTotal, l }))
+      .concat(doVeiculo.map(g => ({ quando: g.quando, valor: g.valor, html: g.html })))
+      .sort((a, b) => b.quando - a.quando);
 
-    if (!lancs.length) {
+    const hoje = chaveDia(Date.now());
+    const comValor = itens.filter(x => x.valor != null);
+    const totalHoje = comValor.filter(x => chaveDia(x.quando) === hoje).reduce((s, x) => s + Number(x.valor), 0);
+    const total = comValor.reduce((s, x) => s + Number(x.valor), 0);
+    $('totais').innerHTML = `<div><small>Hoje</small> <b>${brl(Math.round(totalHoje * 100) / 100)}</b></div><div><small>Total lançado</small> <b>${brl(Math.round(total * 100) / 100)}</b></div>`;
+
+    if (!itens.length) {
       $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar seu primeiro gasto.</div>';
     } else {
       let html = '';
       let diaAtual = '';
-      lancs.forEach(l => {
-        const k = chaveDia(l.dataHora);
-        if (k !== diaAtual) { diaAtual = k; html += `<div class="dia">${esc(rotuloDia(l.dataHora))}</div>`; }
-        html += cartao(l, porLanc[l.id] || []);
+      itens.forEach(x => {
+        const k = chaveDia(x.quando);
+        if (k !== diaAtual) { diaAtual = k; html += `<div class="dia">${esc(rotuloDia(x.quando))}</div>`; }
+        html += x.l ? cartao(x.l, porLanc[x.l.id] || []) : x.html;
       });
       $('lista').innerHTML = html;
     }
@@ -1047,6 +1072,10 @@
   }
 
   $('lista').addEventListener('click', (e) => {
+    const aviso = e.target.closest('[data-aviso]');
+    if (aviso) { Veiculos.explicarAviso(aviso.dataset.aviso, aviso.dataset.id); return; } // ⚠️ de um gasto do veículo
+    const g = e.target.closest('[data-registro]');
+    if (g) { Veiculos.abrirRegistro(g.dataset.registro); return; } // gasto do veículo: abre direto (V6)
     const c = e.target.closest('.cartao');
     if (c) abrirLancamento(c.dataset.id);
   });
@@ -2011,7 +2040,8 @@
       const escolha = await escolher(
         `${plural(n, 'Há 1 lançamento que ainda não foi enviado', 'Há # lançamentos que ainda não foram enviados')} ao servidor. ` +
         `Removendo o app sem enviar, ${plural(n, 'ele será perdido', 'eles serão perdidos')}.`,
-        [{ valor: 'enviar', texto: 'Enviar e remover', classe: 'primario' }, { valor: 'remover', texto: 'Remover sem enviar', classe: 'perigo' }, { valor: null, texto: 'Cancelar' }]);
+        [{ valor: 'enviar', texto: 'Enviar e remover', classe: 'primario' }, { valor: 'remover', texto: 'Remover sem enviar', classe: 'perigo' }, { valor: null, texto: 'Cancelar' }],
+        { importante: true });
       if (!escolha) return;
       if (escolha === 'enviar') {
         if (Sync.conexao() === 'offline') { toast('Sem internet. Conecte o celular para enviar antes de remover.', 4500); return; }
@@ -2117,6 +2147,79 @@
   }, 60000);
 
   // ------------------------------------------------------------------
+  //  Puxar a tela para baixo atualiza (V6): sincroniza e redesenha a tela
+  //  em que a pessoa está, sem recarregar o app e sem perder o que estiver
+  //  digitado. Nos dados móveis vale como tocar nas setas.
+  // ------------------------------------------------------------------
+  const PUXAR_LIMITE = 64;
+  const SEM_PUXAR = new Set(['boas-vindas', 'senha', 'removido', 'whatsapp']);
+  const puxar = { y0: null, d: 0, el: null };
+  function prepararPuxar() {
+    const el = document.createElement('div');
+    el.id = 'puxar-atualizar';
+    el.className = 'puxar';
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = $('btn-sync').querySelector('svg').outerHTML;
+    document.body.appendChild(el);
+    puxar.el = el;
+    const podeComecar = (e) => e.touches.length === 1 && !dialogoAberto && !removido && window.scrollY <= 0 &&
+      !SEM_PUXAR.has(telaAtual) && !Visor.aberto() && !Camera.aberta() && !Recorte.aberto() &&
+      !el.classList.contains('girando') && !(e.target.closest && e.target.closest('textarea, select, .fundo-dialogo'));
+    document.addEventListener('touchstart', (e) => {
+      puxar.y0 = podeComecar(e) ? e.touches[0].clientY : null;
+      puxar.d = 0;
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (puxar.y0 == null) return;
+      const dy = e.touches[0].clientY - puxar.y0;
+      if (dy <= 0 || window.scrollY > 0) { if (puxar.d) esconderPuxar(); puxar.d = 0; return; }
+      puxar.d = Math.min(dy * 0.5, 110);
+      el.classList.add('arrastando');
+      el.classList.toggle('pronto', puxar.d >= PUXAR_LIMITE);
+      el.style.opacity = String(Math.min(1, puxar.d / 40));
+      el.style.transform = `translateY(${puxar.d - 44}px) rotate(${-puxar.d * 3}deg)`;
+    }, { passive: true });
+    const soltar = () => {
+      if (puxar.y0 == null) return;
+      puxar.y0 = null;
+      el.classList.remove('arrastando');
+      if (puxar.d >= PUXAR_LIMITE) atualizarPuxando();
+      else esconderPuxar();
+      puxar.d = 0;
+    };
+    document.addEventListener('touchend', soltar, { passive: true });
+    document.addEventListener('touchcancel', soltar, { passive: true });
+  }
+  function esconderPuxar() {
+    const el = puxar.el;
+    el.classList.remove('arrastando', 'pronto', 'girando');
+    el.style.opacity = '0';
+    el.style.transform = '';
+  }
+  async function atualizarPuxando() {
+    const el = puxar.el;
+    el.classList.add('girando');
+    el.classList.remove('pronto');
+    el.style.opacity = '1';
+    el.style.transform = 'translateY(22px)';
+    const inicio = Date.now();
+    try {
+      let r = await Sync.sincronizar({ manual: true });
+      // já estava sincronizando: espera terminar (no máximo 3 minutos)
+      while (r && r.ignorado === 'rodando' && Sync.estaRodando() && Date.now() - inicio < 180000) {
+        await new Promise(ok => setTimeout(ok, 400));
+        if (!Sync.estaRodando()) r = null;
+      }
+      // a sincronização redesenha a tela inicial e as listas dos veículos; nas outras telas nada é apagado
+      if (telaAtual === 'inicio' && r && r.ignorado) renderInicio();
+    } catch (e) { /* o aviso da sincronização já aparece */ }
+    const falta = 600 - (Date.now() - inicio);
+    if (falta > 0) await new Promise(ok => setTimeout(ok, falta));
+    esconderPuxar();
+  }
+  prepararPuxar();
+
+  // ------------------------------------------------------------------
   //  Instalação e atualização do app
   // ------------------------------------------------------------------
   window.addEventListener('beforeinstallprompt', (e) => {
@@ -2188,6 +2291,7 @@
     try { await guardarCodigoDoLink(); } catch (e) { /* segue */ }
     try { await limparArquivosAntigos(); } catch (e) { /* não impede o uso */ }
     $('ini-versao').textContent = 'v' + VERSAO_DO_APP;
+    Melhorias.colocarIcones(); // ícone discreto do pedido de correção ou melhoria (V6)
     prefCameraSistema = !!(await Banco.lerConfig('cameraSistema', false));
     const perfil = await Perfil.obter();
     if (!perfil || !perfil.token) { iniciarBoasVindas(motivoEntrada(perfil)); return; }

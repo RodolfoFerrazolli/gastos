@@ -320,6 +320,9 @@
       <label for="vf-cor">Cor</label>
       <input id="vf-cor" list="vf-cores" autocapitalize="words" autocomplete="off" placeholder="Ex.: Prata">
       <datalist id="vf-cores"></datalist>
+      <label for="vf-obs">Observação <small class="opcional">(opcional)</small></label>
+      <textarea id="vf-obs" rows="3" maxlength="1000" autocapitalize="sentences" placeholder="Ex.: Carro alugado para a viagem"></textarea>
+      <small class="contador-letras" id="vf-obs-contador"></small>
       <p class="erro" id="vf-erro"></p>
       <div class="rodape-form">
         <button class="botao primario grande" id="vf-salvar" type="button">Salvar</button>
@@ -333,7 +336,10 @@
     <header class="topo">
       <button class="botao-icone" id="vx-voltar" aria-label="Voltar">←</button>
       <div class="topo-textos"><div class="topo-titulo" id="vx-titulo"></div><div class="topo-sub" id="vx-sub"></div></div>
-      <button class="botao-icone" id="vx-config" type="button" aria-label="Configurações do veículo" title="Configurações do veículo">⚙️</button>
+      <div class="topo-acoes">
+        <button class="botao-icone" id="vx-info" type="button" aria-label="Informações do veículo" title="Informações do veículo">ℹ️</button>
+        <button class="botao-icone" id="vx-config" type="button" aria-label="Configurações do veículo" title="Configurações do veículo">⚙️</button>
+      </div>
     </header>
     <div class="totais" id="vx-totais"></div>
     <div id="vx-lista" class="com-fab"></div>
@@ -489,6 +495,7 @@
   <script src="visor.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="veiculos.js"></script>
+  <script src="melhorias.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

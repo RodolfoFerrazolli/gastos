@@ -24,7 +24,7 @@ const Sync = (() => {
   // Campos que só o servidor preenche
   const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'];
   // Veículos (V4; a cor entrou na V5)
-  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'alteradoEm'];
+  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'observacao', 'alteradoEm'];
   // do veículo, só o servidor sabe: se é da conta ("meu") ou compartilhado com ela, e quem é o dono (V5)
   const CAMPOS_VEICULO_SERVIDOR = ['meu', 'dono'];
   const CAMPOS_REGISTRO = ['veiculoId', 'tipo', 'data', 'valor', 'formaPagamento', 'descricao', 'hodometro', 'combustivel',
@@ -77,6 +77,8 @@ const Sync = (() => {
       if (ignorar.has(a.lancamentoId)) return;
       if ((!a.enviado && !a.remover && a.blob) || (a.remover && a.enviado)) ids.add(a.lancamentoId);
     });
+    // pedidos de correção ou melhoria esperando o envio (V6)
+    ((await Banco.lerConfig('melhoriasPendentes', [])) || []).forEach(m => ids.add('melhoria:' + m.id));
     return ids.size;
   }
 
@@ -346,8 +348,10 @@ const Sync = (() => {
   function mesclarLeitura(reg, resp) {
     const c = (resp && resp.campos) || {};
     const auto = new Set(reg.automaticos || []);
-    const livre = (k) => reg[k] == null || reg[k] === '' || auto.has(k);
-    const usar = (k, v) => { if (v != null && v !== '' && livre(k)) { reg[k] = v; auto.delete(k); } };
+    // V6: o que a IA preencheu antes também pode ser trocado por uma leitura nova (com mais áudios ou fotos)
+    const ia = new Set(reg.lidosIA || []);
+    const livre = (k) => reg[k] == null || reg[k] === '' || auto.has(k) || ia.has(k);
+    const usar = (k, v) => { if (v != null && v !== '' && livre(k)) { reg[k] = v; auto.delete(k); ia.add(k); } };
     usar('combustivel', c.combustivel);
     usar('hodometro', c.hodometro);
     usar('precoLitro', c.precoLitro);
@@ -374,7 +378,91 @@ const Sync = (() => {
       reg.calculado = '';
     }
     reg.automaticos = Array.from(auto);
+    reg.lidosIA = Array.from(ia).filter(k => !auto.has(k));
     return reg;
+  }
+
+  /**
+   * Leitura do abastecimento (V6): todos os áudios e todas as fotos (nota, bomba e painel) numa leitura só.
+   * audios e fotos: [{ mime, qr?, base64: async () => texto }]. Com o servidor ainda na V5, lê o último
+   * áudio e a nota separados (como antes). Devolve { campos, fonte, transcricao, tiposFotos, falhas, ... }.
+   */
+  async function lerAbastecimento({ audios = [], fotos = [], qr = '', lerVoz = true, lerNota = true }) {
+    const perfil = await Perfil.obter();
+    const antigo = !!(perfil && perfil.versaoServidor && Number(perfil.versaoServidor) < 6);
+    if (!antigo) {
+      const A = [];
+      for (const a of audios) { const b = await a.base64(); if (b) A.push({ mime: a.mime || 'audio/webm', base64: b }); }
+      const F = [];
+      for (const f of fotos) { const b = await f.base64(); if (b) F.push({ mime: f.mime || 'image/jpeg', base64: b, qr: !!f.qr }); }
+      if (!A.length && !F.length && !qr) throw new Api.ErroServidor('dados_invalidos', 'Os áudios e as fotos não estão neste celular.');
+      try {
+        const r = await Api.chamar('lerVeiculo', { modo: 'tudo', audios: A, fotos: F, qr: qr || '' }, { tempoMs: 170000 });
+        return Object.assign(r, { audiosLidos: A.length, falhas: [] });
+      } catch (e) {
+        if (!(e instanceof Api.ErroServidor && e.codigo === 'dados_invalidos' && /modo de leitura/i.test(e.message || ''))) throw e;
+        // o servidor ainda não foi atualizado para a V6: lê como antes
+      }
+    }
+    const respostas = {};
+    const falhas = [];
+    const falhou = (e, texto) => {
+      if (e instanceof Api.ErroServidor && ['ia_falhou', 'dados_invalidos', 'arquivo_inexistente'].includes(e.codigo)) { falhas.push(texto); return; }
+      throw e;
+    };
+    const ultimo = audios[audios.length - 1];
+    if (lerVoz && ultimo) {
+      try {
+        respostas.voz = await Api.chamar('lerVeiculo', { modo: 'audio', mime: ultimo.mime || 'audio/webm', base64: await ultimo.base64() }, { tempoMs: 150000 });
+      } catch (e) { falhou(e, 'A IA não conseguiu entender o áudio.'); }
+    }
+    if (lerNota && (fotos.length || qr)) {
+      try {
+        respostas.nota = await lerNotaPosto(qr, async () => {
+          const lista = [];
+          for (const f of fotos) { const b = await f.base64(); if (b) lista.push({ mime: f.mime || 'image/jpeg', base64: b }); }
+          return lista;
+        });
+      } catch (e) { falhou(e, 'Não foi possível ler a nota.'); }
+    }
+    if (!respostas.voz && !respostas.nota) throw new Api.ErroServidor('ia_falhou', falhas.join(' ') || 'Nada para ler.');
+    // a nota vale mais que o áudio; o hodômetro vem do áudio
+    const n = (respostas.nota && respostas.nota.campos) || {};
+    const v = (respostas.voz && respostas.voz.campos) || {};
+    const campos = {};
+    ['combustivel', 'precoLitro', 'litros', 'valorTotal', 'formaPagamento', 'data', 'local'].forEach((k) => {
+      campos[k] = n[k] != null && n[k] !== '' ? n[k] : (v[k] != null && v[k] !== '' ? v[k] : null);
+    });
+    campos.hodometro = v.hodometro != null ? v.hodometro : null;
+    campos.tanqueCheio = v.tanqueCheio != null ? v.tanqueCheio : null;
+    return {
+      ok: true, campos, falhas, audiosLidos: respostas.voz ? 1 : 0,
+      fonte: [respostas.nota ? respostas.nota.fonte || 'ia' : '', respostas.voz ? 'voz' : ''].filter(Boolean).join('+'),
+      transcricao: respostas.voz ? respostas.voz.transcricao || '' : '',
+      tiposFotos: respostas.nota ? fotos.map(() => 'nota') : [],
+      outrosItens: respostas.nota ? respostas.nota.outrosItens : [],
+      aviso: [respostas.nota && respostas.nota.aviso, respostas.voz && respostas.voz.aviso].filter(Boolean).join(' '),
+      observacao: [respostas.nota && respostas.nota.observacao, respostas.voz && respostas.voz.observacao].filter(Boolean).join(' '),
+      chave: respostas.nota ? respostas.nota.chave || '' : ''
+    };
+  }
+
+  /** O que a leitura leu, em palavras (ex.: "a nota (pelo site da SEFAZ), a foto da bomba e o áudio"). */
+  function resumoDaLeitura(resp) {
+    const f = String((resp && resp.fonte) || '').split('+');
+    const tipos = (resp && resp.tiposFotos) || [];
+    const conta = (t) => tipos.filter(x => x === t).length;
+    const partes = [];
+    const de = (n, um, varios) => (n > 1 ? varios.replace('#', n) : um);
+    if (f.includes('sefaz')) partes.push('a nota (pelo site da SEFAZ, com o QR Code)');
+    else if (conta('nota')) partes.push(de(conta('nota'), 'a foto da nota', 'as # fotos da nota'));
+    if (conta('bomba')) partes.push(de(conta('bomba'), 'a foto da bomba', 'as # fotos da bomba'));
+    if (conta('painel')) partes.push(de(conta('painel'), 'a foto do painel', 'as # fotos do painel'));
+    if (f.includes('voz')) partes.push(de(resp.audiosLidos || 1, 'o áudio', 'os # áudios'));
+    if (!partes.length && f.includes('ia')) partes.push('as fotos');
+    let texto = partes.length > 1 ? partes.slice(0, -1).join(', ') + ' e ' + partes[partes.length - 1] : (partes[0] || '');
+    if (conta('outra')) texto += (texto ? ' ' : '') + `(${de(conta('outra'), '1 foto não era', '# fotos não eram')} da nota, da bomba nem do painel)`;
+    return texto;
   }
 
   /** O valor que falta no abastecimento: total = litro × litros; litros = total ÷ litro; litro = total ÷ litros. */
@@ -389,53 +477,45 @@ const Sync = (() => {
   }
 
   /**
-   * Lê o áudio e/ou a nota de um abastecimento salvo e grava o resultado para a pessoa revisar.
+   * Lê os áudios e as fotos de um abastecimento salvo e grava o resultado para a pessoa revisar.
    * Devolve 'lido', 'nada', ou { parar: 'limite' | 'config', mensagem }.
    */
   async function lerGastoVeiculo(id) {
     const reg = await Banco.obter('registros', id);
     if (!reg || reg.status !== 'aguardando_ia' || reg.excluirPendente) return 'nada';
     const arqs = (await Banco.porIndice('arquivos', 'lancamentoId', id)).filter(a => !a.remover);
-    const audio = arqs.filter(a => a.tipo === 'audio').sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0))[0];
-    const fotos = arqs.filter(a => a.tipo === 'foto').sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0));
+    const porData = (a, b) => (a.criadoEm || 0) - (b.criadoEm || 0);
+    const audios = arqs.filter(a => a.tipo === 'audio').sort(porData);
+    const fotos = arqs.filter(a => a.tipo === 'foto').sort(porData);
     // só o celular que gravou o áudio ou tirou a foto manda ler (assim a IA gratuita não lê duas vezes);
     // nos outros celulares da conta a pessoa pode pedir "Ler agora" abrindo o abastecimento
-    const querVoz = !!reg.lerVoz && !!audio;
+    const querVoz = !!reg.lerVoz && audios.length > 0;
     const querNota = !!reg.lerNota && reg.tipo === 'abastecimento' && (fotos.length > 0 || !!reg.qrNota);
     if (!querVoz && !querNota) return 'nada'; // o áudio ou a foto ainda não estão aqui: espera
-    const respostas = [];
-    const falhas = [];
-    for (const modo of [querVoz ? 'voz' : '', querNota ? 'nota' : ''].filter(Boolean)) {
-      try {
-        respostas.push(modo === 'voz'
-          ? Object.assign({ modo }, await Api.chamar('lerVeiculo', { modo: 'audio', mime: audio.mime || 'audio/webm', base64: await base64DoArquivo(audio) }, { tempoMs: 150000 }))
-          : Object.assign({ modo }, await lerNotaPosto(reg.qrNota, async () => {
-            const lista = [];
-            for (const f of fotos) { const b = await base64DoArquivo(f); if (b) lista.push({ mime: f.mime || 'image/jpeg', base64: b }); }
-            return lista;
-          })));
-      } catch (e) {
-        if (e instanceof Api.ErroServidor && e.codigo === 'ia_limite') return { parar: 'limite' };
-        if (e instanceof Api.ErroServidor && e.codigo === 'ia_config') return { parar: 'config', mensagem: e.message };
-        if (e instanceof Api.ErroServidor && (e.codigo === 'ia_falhou' || e.codigo === 'dados_invalidos' || e.codigo === 'arquivo_inexistente')) {
-          falhas.push(modo === 'voz' ? 'A IA não conseguiu entender o áudio.' : 'Não foi possível ler a nota.');
-          continue;
-        }
-        throw e; // sem internet, IA ocupada... tenta de novo na próxima sincronização
-      }
+    let resp;
+    try {
+      resp = await lerAbastecimento({
+        audios: audios.map(a => ({ mime: a.mime || 'audio/webm', base64: () => base64DoArquivo(a) })),
+        fotos: fotos.map(f => ({ mime: f.mime || 'image/jpeg', qr: !!f.qr, base64: () => base64DoArquivo(f) })),
+        qr: reg.qrNota || '', lerVoz: querVoz, lerNota: querNota
+      });
+    } catch (e) {
+      if (e instanceof Api.ErroServidor && e.codigo === 'ia_limite') return { parar: 'limite' };
+      if (e instanceof Api.ErroServidor && e.codigo === 'ia_config') return { parar: 'config', mensagem: e.message };
+      if (!(e instanceof Api.ErroServidor && ['ia_falhou', 'dados_invalidos', 'arquivo_inexistente'].includes(e.codigo))) throw e; // sem internet, IA ocupada... tenta de novo depois
+      const oque = querVoz && querNota ? 'os áudios e as fotos' : querVoz ? (audios.length > 1 ? 'os áudios' : 'o áudio') : (fotos.length > 1 ? 'as fotos' : 'a foto');
+      resp = { campos: {}, falhas: [`A IA não conseguiu ler ${oque}.`] };
     }
     const atual = await Banco.obter('registros', id); // pode ter mudado enquanto a IA lia
     if (!atual || atual.excluirPendente) return 'nada';
-    const avisos = [];
-    respostas.forEach((r) => {
-      mesclarLeitura(atual, r);
-      if (r.modo === 'voz') { atual.transcricao = r.transcricao || ''; if (!atual.fonte) atual.fonte = 'voz'; }
-      else { atual.fonte = r.fonte || atual.fonte; if (r.chave) atual.chaveNota = r.chave; }
-      const a = avisosDaLeitura(r);
-      if (a) avisos.push(a);
-    });
-    if (falhas.length) avisos.push(falhas.join(' ') + ' Preencha você mesmo.');
-    atual.observacao = avisos.join(' ').slice(0, 500);
+    mesclarLeitura(atual, resp);
+    if (resp.transcricao) atual.transcricao = resp.transcricao;
+    if (resp.fonte) atual.fonte = resp.fonte;
+    if (resp.chave) atual.chaveNota = resp.chave;
+    const avisos = [avisosDaLeitura(resp)];
+    if (resp.falhas && resp.falhas.length) avisos.push(resp.falhas.join(' ') + ' Preencha você mesmo.');
+    atual.observacao = avisos.filter(Boolean).join(' ').slice(0, 500);
+    atual.resumoLeitura = resumoDaLeitura(resp);
     atual.lerVoz = false;
     atual.lerNota = false;
     atual.status = 'revisar';
@@ -451,7 +531,7 @@ const Sync = (() => {
       let mudou = false;
       if (r.nome && r.nome !== perfil.nome) { perfil.nome = r.nome; mudou = true; } // o organizador pode ter corrigido o nome
       // WhatsApp da conta e se ela é a do organizador (servidor V2)
-      ['whatsapp', 'precisaWhatsapp', 'organizador', 'email', 'precisaEmail'].forEach((k) => {
+      ['whatsapp', 'precisaWhatsapp', 'organizador', 'email', 'precisaEmail', 'versaoServidor'].forEach((k) => {
         if (r[k] !== undefined && r[k] !== perfil[k]) { perfil[k] = r[k]; mudou = true; }
       });
       // servidor da versão 1.1 (ainda não atualizado): não sabe ler notas por foto
@@ -670,6 +750,26 @@ const Sync = (() => {
         }
       }
 
+      // M) pedidos de correção ou melhoria (V6): sobem com o áudio e a imagem da tela
+      const perfilAgora = await Perfil.obter();
+      const servidorAntesDaV6 = !!(perfilAgora && perfilAgora.versaoServidor && Number(perfilAgora.versaoServidor) < 6);
+      if (!somenteBaixar && !servidorAntesDaV6) {
+        for (const m of ((await Banco.lerConfig('melhoriasPendentes', [])) || []).slice()) {
+          avisar('sincronizando', { manual, visivel, detalhe: 'Enviando o pedido de melhoria…' });
+          const dados = {
+            id: m.id, criadoEm: m.criadoEm, tela: m.tela, nomeTela: m.nomeTela, janela: m.janela || '', texto: m.texto || '',
+            duracao: m.duracao || 0, versaoApp: m.versaoApp || '', aparelho: m.aparelho || ''
+          };
+          if (m.audio) dados.audio = { mime: m.audioMime || m.audio.type || 'audio/webm', base64: await blobParaBase64(m.audio) };
+          if (m.imagem) dados.imagem = { mime: 'image/jpeg', base64: await blobParaBase64(m.imagem) };
+          const r = await item(() => Api.chamar('enviarMelhoria', { melhoria: dados }, { tempoMs: 120000 }), resumo, 'pedido de melhoria');
+          if (!r) continue;
+          const resto = ((await Banco.lerConfig('melhoriasPendentes', [])) || []).filter(x => x.id !== m.id);
+          await Banco.gravarConfig('melhoriasPendentes', resto);
+          resumo.melhorias = (resumo.melhorias || 0) + 1;
+        }
+      }
+
       // 6) novidades do servidor (histórico da conta, outros celulares, IA, administrador, endereços, listas)
       const desde = (await Banco.lerConfig('desde', 0)) || 0;
       avisar('sincronizando', { manual, visivel, detalhe: desde ? 'Buscando novidades…' : 'Buscando seus lançamentos…' });
@@ -732,6 +832,6 @@ const Sync = (() => {
   return {
     sincronizar, conexao, pendentes, apagarLocal, apagarVeiculoLocal, estaRodando: () => rodando, calcularTerceiro,
     // usados pelo formulário do abastecimento ("Lançar por voz" e "Ler nota do posto" na hora)
-    lerNotaPosto, blobParaBase64, avisosDaLeitura
+    lerNotaPosto, blobParaBase64, avisosDaLeitura, lerAbastecimento, resumoDaLeitura
   };
 })();

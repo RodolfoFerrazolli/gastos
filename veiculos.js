@@ -11,6 +11,10 @@
 //  V5: cor do veículo, compartilhamento com outras contas (o dono pode
 //  tudo; quem recebe lança e mexe só no que lançou), os três valores do
 //  abastecimento (dois calculam o terceiro) e o calendário das datas.
+//  V6: os gastos (menos a Galeria) também aparecem na tela inicial;
+//  observação no cadastro e ℹ️ com as informações do veículo; o
+//  abastecimento guarda vários áudios e várias fotos (nota, bomba e
+//  painel), lidos juntos pela IA numa leitura só.
 // =====================================================================
 const Veiculos = (() => {
   const $ = (id) => document.getElementById(id);
@@ -40,7 +44,8 @@ const Veiculos = (() => {
   const TEM_KM = new Set(['abastecimento', 'manutencao']);
   const TEM_LOCAL = new Set(['abastecimento', 'manutencao', 'galeria']);
   const KM_MAXIMO = 1000000;
-  const OPCOES_NOTA_POSTO = { lerQr: true, ladoMaximo: 2400, qualidade: 0.8, tituloCamera: 'Foto da nota do posto', titulo: 'Nota do posto' };
+  // fotos do abastecimento (V6): da nota, da bomba e do painel; o QR Code da nota é procurado em todas
+  const OPCOES_NOTA_POSTO = { lerQr: true, ladoMaximo: 2400, qualidade: 0.8, tituloCamera: 'Foto do abastecimento', titulo: 'Foto do abastecimento' };
   const OPCOES_FOTO_VEICULO = { tituloCamera: 'Foto do veículo', titulo: 'Foto do veículo' };
   const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   // campo da tela -> campo do gasto (o que a pessoa mexe deixa de ser "automático" e a IA não troca)
@@ -297,13 +302,13 @@ const Veiculos = (() => {
   async function podeSair() {
     const tela = App().telaAtual();
     if (tela === 'v-registro' && VR) {
-      const mudou = VR.alterado || VR.fotosNovas.length || VR.audioNovo || Gravador.gravando();
+      const mudou = VR.alterado || VR.fotosNovas.length || VR.audiosNovos.length || Gravador.gravando();
       if (mudou && !(await App().confirmar('Descartar as alterações deste lançamento?', 'Descartar', 'Continuar editando'))) return false;
       if (Gravador.gravando()) { clearInterval(VR.relogio); Gravador.cancelar(); }
       VR.token = null; // a resposta da IA que ainda chegar é ignorada
       VR.alterado = false;
       VR.fotosNovas = [];
-      VR.audioNovo = null;
+      VR.audiosNovos = [];
       return true;
     }
     if (tela === 'veiculo-form' && VF.alterado) {
@@ -418,6 +423,8 @@ const Veiculos = (() => {
     $('vf-ano').value = v && v.ano ? String(v.ano) : '';
     $('vf-placa').value = v ? v.placa || '' : '';
     $('vf-cor').value = v ? v.cor || '' : '';
+    $('vf-obs').value = v ? v.observacao || '' : '';
+    contarLetrasObs();
     // veículo de antes da V5, sem a cor: o campo já aparece marcado
     $('vf-erro').textContent = v && !v.cor ? 'Falta a cor do veículo.' : '';
     $('vf-cor').classList.toggle('falta', !!(v && !v.cor));
@@ -434,6 +441,7 @@ const Veiculos = (() => {
     const anoMaximo = new Date().getFullYear() + 1;
     const placa = normalizarPlaca($('vf-placa').value);
     const cor = normalizarCor($('vf-cor').value);
+    const observacao = $('vf-obs').value.trim().slice(0, 1000);
     if (!montadora) return erro('Informe a montadora.');
     if (!modelo) return erro('Informe o modelo.');
     if (!/^\d{4}$/.test(anoTexto) || ano < 1900 || ano > anoMaximo) return erro(`Informe o ano com 4 números (de 1900 a ${anoMaximo}).`);
@@ -446,7 +454,7 @@ const Veiculos = (() => {
     let v = VF.id ? await Banco.obter('veiculos', VF.id) : null;
     if (VF.id && (!v || v.excluirPendente)) { toast('Este veículo não existe mais.'); VF.alterado = false; App().voltar(); return; }
     if (!v) v = { id: novoId(), criadoEm: agora, versaoBase: 0 };
-    Object.assign(v, { montadora, modelo, ano, placa, cor, alteradoEm: agora, sync: 'pendente' });
+    Object.assign(v, { montadora, modelo, ano, placa, cor, observacao, alteradoEm: agora, sync: 'pendente' });
     const botao = $('vf-salvar');
     botao.disabled = true;
     try {
@@ -461,6 +469,11 @@ const Veiculos = (() => {
     VF.alterado = false;
     App().voltar();
     App().agendarSync(800);
+  }
+
+  function contarLetrasObs() {
+    const n = $('vf-obs').value.length;
+    $('vf-obs-contador').textContent = n ? `${n} de 1000 letras` : '';
   }
 
   async function excluirVeiculo() {
@@ -493,7 +506,7 @@ const Veiculos = (() => {
   //  Extrato do veículo
   // ------------------------------------------------------------------
   /** autor: primeiro nome de quem lançou (só nos veículos compartilhados); '' para não mostrar. */
-  function cartaoGasto(r, arqs, avisoKm, comMiniatura, autor) {
+  function cartaoGasto(r, arqs, avisoKm, comMiniatura, autor, veiculo) {
     const t = TIPOS[r.tipo] || { icone: '•', nome: r.tipo };
     const fotos = arqs.filter(a => a.tipo === 'foto');
     const nFotos = Math.max(fotos.length, Number(r.qtdFotos) || 0);
@@ -523,6 +536,7 @@ const Veiculos = (() => {
       if (r.local) meta.push(r.local);
     }
     if (autor) meta.push('por ' + autor);
+    if (veiculo) meta[0] = '🚗 ' + nomeVeiculo(veiculo); // tela inicial (V6): a data já está no título do dia
     let metaHtml = meta.filter(Boolean).map(esc).join(' · ');
     // os avisos são botões: tocar explica o porquê (V5)
     const aviso = (tipo, texto) => ` · <button type="button" class="aviso-km aviso-botao" data-aviso="${tipo}" data-id="${esc(r.id)}">⚠️ ${texto}</button>`;
@@ -623,6 +637,32 @@ const Veiculos = (() => {
     await Sync.apagarVeiculoLocal(v.id);
     toast('Você saiu do compartilhamento.');
     App().voltar(); // a tela do veículo não existe mais: o "voltar" segue até a lista
+  }
+
+  /** ℹ️ da tela do veículo (V6): tudo o que está cadastrado, só para ver (também para quem recebeu o compartilhamento). */
+  async function infoDoVeiculo() {
+    const v = await veiculoAtivo(dadosAtuais().veiculoId);
+    if (!v) return;
+    const linha = (rot, val) => `<div class="info-linha"><small>${rot}</small><div>${val ? esc(val) : '<span class="dica">Não informado</span>'}</div></div>`;
+    let comp = '';
+    if (ehMeu(v)) {
+      const lista = await compartilhamentosDe(v.id);
+      comp = lista.length
+        ? lista.map(c => esc(c.nome) + (c.situacao === 'pendente' ? ' <small class="texto-laranja">(pendente)</small>' : '')).join('<br>')
+        : 'Não está compartilhado.';
+    } else {
+      comp = `${esc(primeiroNome(v.dono) || 'Outra pessoa')} compartilhou com você.`;
+    }
+    const obs = v.observacao ? `<div class="info-obs">${esc(v.observacao)}</div>` : '<span class="dica">Nenhuma observação.</span>';
+    App().abrirDialogo('<div class="fundo-dialogo"><div class="dialogo info-veiculo" role="dialog"><h2>ℹ️ Informações do veículo</h2>' +
+      linha('Montadora', v.montadora) + linha('Modelo', v.modelo) + linha('Ano', v.ano ? String(v.ano) : '') +
+      linha('Placa', v.placa) + linha('Cor', v.cor) +
+      `<div class="info-linha"><small>Observação</small><div>${obs}</div></div>` +
+      linha('Dono', ehMeu(v) ? 'Você' : (v.dono || 'Outra pessoa')) +
+      `<div class="info-linha"><small>Compartilhamento</small><div>${comp}</div></div>` +
+      '<div class="botoes"><button class="botao primario" type="button" id="vi-ok">Fechar</button></div></div></div>',
+    () => { /* só fecha */ }, { fora: true });
+    $('vi-ok').onclick = () => App().fecharDialogo();
   }
 
   /** Tocar no ⚠️ de um gasto explica o porquê. */
@@ -835,12 +875,14 @@ const Veiculos = (() => {
       modo, r, veiculo: v, token: novoId(),
       outros: (await gastosDo(v.id)).filter(x => x.id !== r.id),
       arquivos,
-      fotosNovas: [], removerIds: [], audioNovo: null, alterado: false,
+      fotosNovas: [], removerIds: [], audiosNovos: [], alterado: false,
       // valores que o app pôs sozinho (a leitura da IA pode trocar); o que a pessoa digita sai daqui
       auto: new Set(modo === 'novo' ? ['data', 'precoLitro', 'local', 'tanqueCheio'] : (r.status === 'aguardando_ia' ? (r.automaticos || []) : [])),
+      // V6: valores que a IA leu (uma leitura nova, com mais áudios ou fotos, pode trocar); o que a pessoa digita sai daqui
+      ia: new Set(modo === 'novo' ? [] : (r.lidosIA || [])),
       gps: null, localPendente: !!r.localPendente, localCoordenadas: r.localCoordenadas || '',
       lendo: '', msgLeitura: null, leituraAgora: null, relogio: null,
-      // valor do litro, litros e total: 'user' (digitado ou lido), 'pre' (preço sugerido), 'calc' (calculado) ou 'vazio'
+      // valor do litro, litros e total: 'user' (digitado), 'ia' (lido pela IA), 'pre' (preço sugerido), 'calc' (calculado) ou 'vazio'
       calc: { precoLitro: 'vazio', litros: 'vazio', valor: 'vazio' },
       // compartilhado: quem não lançou (e não é o dono do veículo) só vê (V5)
       somenteLeitura: modo !== 'novo' && !podeAlterar(r, v),
@@ -891,9 +933,13 @@ const Veiculos = (() => {
     switch (r.tipo) {
       case 'abastecimento':
         html = '<div class="linha-botoes botoes-foto botoes-leitura">' +
-            '<button class="botao" type="button" id="vr-voz">🎤 Lançar por voz</button>' +
-            '<button class="botao" type="button" id="vr-nota">🧾 Ler nota do posto</button></div>' +
+            '<button class="botao" type="button" id="vr-voz">🎤 Gravar áudio</button>' +
+            '<button class="botao" type="button" id="vr-foto">📷 Fotos</button></div>' +
+          '<small class="dica dica-leitura" id="vr-dica-leitura">Grave áudios contando o abastecimento e/ou tire fotos da nota, da bomba ' +
+            '(valor do litro, litros e total) e do painel (hodômetro). A IA lê tudo junto e preenche os campos vazios.</small>' +
           '<div id="vr-ia"></div>' +
+          '<div id="vr-audios"></div>' +
+          '<div id="vr-bloco-fotos" class="oculto"><label>Fotos do abastecimento</label><div class="fotos" id="vr-fotos"></div></div>' +
           '<label for="vr-combustivel">Combustível</label>' +
           '<div class="linha-combustivel"><select id="vr-combustivel"></select>' +
             '<label class="marcar"><input type="checkbox" id="vr-tanque"> Tanque cheio</label></div>' +
@@ -904,8 +950,7 @@ const Veiculos = (() => {
             `<div>${campoValorHtml('vr-litros', '<span id="vr-litros-rotulo">Litros</span>', 3)}</div>` +
             `<div>${campoValorHtml('vr-valor', 'Valor total', 2, 'R$ 0,00')}</div></div>` +
           '<div class="tres-info" id="vr-tres"></div>' +
-          campoDataHtml() + HTML_PAGAMENTO + HTML_LOCAL +
-          '<div id="vr-bloco-fotos" class="oculto"><label>Fotos da nota</label><div class="fotos" id="vr-fotos"></div></div>';
+          campoDataHtml() + HTML_PAGAMENTO + HTML_LOCAL;
         break;
       case 'manutencao':
         html = campoDataHtml() + HTML_KM + campoValorHtml('vr-valor', 'Valor pago (R$)') +
@@ -977,13 +1022,15 @@ const Veiculos = (() => {
       recalcularTres(null);
       atualizarBotaoVoz();
       renderIA();
+      renderAudios();
+      if (VR.somenteLeitura && $('vr-dica-leitura')) $('vr-dica-leitura').classList.add('oculto');
     }
     if (TEM_KM.has(r.tipo)) { atualizarPlaceholderKm(); atualizarAvisoKm(); }
     if (r.tipo === 'abastecimento' || r.tipo === 'galeria') await renderFotos();
     if (VR.somenteLeitura) {
       // só ver: os campos ficam desligados (as fotos e o áudio continuam abrindo)
       $('vr-conteudo').querySelectorAll('input, select, textarea, button').forEach((el) => {
-        if (el.id === 'vr-ouvir' || el.closest('#vr-fotos')) return;
+        if (el.dataset.ouvir || el.closest('#vr-fotos')) return;
         el.disabled = true;
       });
     }
@@ -997,7 +1044,7 @@ const Veiculos = (() => {
   /** O valor do litro vem com o último que a pessoa pagou por esse combustível (ela pode trocar). */
   function aplicarUltimoPreco() {
     const campo = $('vr-preco');
-    if (!campo || VR.calc.precoLitro === 'user' || VR.calc.precoLitro === 'calc') return; // digitado ou calculado: fica
+    if (!campo || ['user', 'ia', 'calc'].includes(VR.calc.precoLitro)) return; // digitado, lido ou calculado: fica
     const comb = $('vr-combustivel').value;
     const preco = comb ? ultimoPreco(comb) : null;
     campo.value = paraMascara(preco, 3);
@@ -1020,7 +1067,7 @@ const Veiculos = (() => {
     const r = VR.r;
     const c = VR.calc;
     const tem = (k) => Number(r[k]) > 0;
-    Object.keys(c).forEach((k) => { c[k] = tem(k) ? 'user' : 'vazio'; });
+    Object.keys(c).forEach((k) => { c[k] = tem(k) ? (VR.ia.has(k) ? 'ia' : 'user') : 'vazio'; });
     if (VR.modo === 'novo') { if (tem('precoLitro')) c.precoLitro = 'pre'; return; }
     const auto = new Set(r.automaticos || []);
     if (r.status === 'aguardando_ia' && tem('precoLitro') && auto.has('precoLitro') && r.calculado !== 'precoLitro') c.precoLitro = 'pre';
@@ -1042,7 +1089,7 @@ const Veiculos = (() => {
     if (origemId && TRES[origemId]) { const k = TRES[origemId]; c[k] = val[k] > 0 ? 'user' : 'vazio'; }
     const ativo = document.activeElement;
     const focado = !ignorarFoco && ativo && TRES[ativo.id] ? ativo.id : '';
-    const base = T.filter(k => c[k] === 'user' && val[k] > 0);
+    const base = T.filter(k => (c[k] === 'user' || c[k] === 'ia') && val[k] > 0);
     if (base.length < 2 && c.precoLitro === 'pre' && val.precoLitro > 0) base.push('precoLitro'); // o último preço pago
     if (base.length === 2) {
       const falta = T.find(k => !base.includes(k));
@@ -1074,7 +1121,7 @@ const Veiculos = (() => {
     const gnv = $('vr-combustivel').value === 'GNV';
     const val = {};
     T.forEach((k) => { val[k] = daMascara($(ID_TRES[k])); });
-    const naoBate = T.every(k => c[k] === 'user') && difValores(val.precoLitro, val.litros, val.valor);
+    const naoBate = T.every(k => c[k] === 'user' || c[k] === 'ia') && difValores(val.precoLitro, val.litros, val.valor);
     if (naoBate) {
       el.innerHTML = '<button type="button" class="aviso-botao aviso-valores" id="vr-aviso-valores">⚠️ Os três valores não batem. Toque para ver.</button>';
       return;
@@ -1215,7 +1262,11 @@ const Veiculos = (() => {
     else VR.fotosNovas = VR.fotosNovas.filter(f => f.id !== id);
     VR.alterado = true;
     const n = await renderFotos();
-    if (VR.r.tipo === 'abastecimento' && !n && VR.r.lerNota) { VR.r.lerNota = false; VR.r.qrNota = ''; renderIA(); }
+    if (VR.r.tipo === 'abastecimento') {
+      if (!VR.fotosNovas.some(f => f.qr) && tipo === 'n' && VR.r.qrNota && !VR.arquivos.some(a => a.tipo === 'foto' && !VR.removerIds.includes(a.id))) VR.r.qrNota = '';
+      if (!n && VR.r.lerNota) { VR.r.lerNota = false; VR.r.qrNota = ''; }
+      renderIA();
+    }
   }
   /** Fotos escolhidas na galeria do celular (galeria do veículo): várias de uma vez, sem a tela de recorte. */
   async function adicionarDaGaleria(input) {
@@ -1247,27 +1298,63 @@ const Veiculos = (() => {
     renderFotos();
   }
 
-  // ---- "Lançar por voz" e "Ler nota do posto": a IA preenche só os campos vazios ----
-  function audioAtual() {
-    if (VR.audioNovo) return VR.audioNovo;
+  // ---- áudios e fotos do abastecimento (V6): todos ficam guardados e são lidos juntos pela IA ----
+  function audiosAtuais() {
     return VR.arquivos.filter(a => a.tipo === 'audio' && !VR.removerIds.includes(a.id))
-      .sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0))[0] || null;
+      .sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0))
+      .map(a => ({ chave: 'e:' + a.id, id: a.id, blob: a.blob || null, enviado: !!a.enviado, duracao: a.duracao, mime: a.mime }))
+      .concat(VR.audiosNovos.map(a => ({ chave: 'n:' + a.id, id: a.id, blob: a.blob, enviado: false, duracao: a.duracao, mime: a.mime })));
+  }
+  function fotosAtuais() {
+    return VR.arquivos.filter(a => a.tipo === 'foto' && !VR.removerIds.includes(a.id))
+      .sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0))
+      .concat(VR.fotosNovas.map(f => ({ id: f.id, blob: f.blob, mime: 'image/jpeg', qr: f.qr || '' })));
   }
   function atualizarBotaoVoz() {
     const b = $('vr-voz');
     if (!b) return;
     b.classList.remove('gravando');
-    b.textContent = audioAtual() ? '🎤 Gravar de novo' : '🎤 Lançar por voz';
+    b.textContent = audiosAtuais().length ? '🎤 Gravar outro áudio' : '🎤 Gravar áudio';
   }
   function travarBotoesLeitura(travar) {
-    ['vr-voz', 'vr-nota'].forEach((id) => { if ($(id)) $(id).disabled = travar; });
+    ['vr-voz', 'vr-foto'].forEach((id) => { if ($(id)) $(id).disabled = travar; });
+  }
+  /** Lista dos áudios: cada um dá para ouvir e (para quem pode alterar) apagar. */
+  function renderAudios() {
+    const el = $('vr-audios');
+    if (!el || !VR) return;
+    const lista = audiosAtuais();
+    if (!lista.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<label>' + (lista.length > 1 ? `Áudios (${lista.length})` : 'Áudio') + '</label><div class="lista-audios">' +
+      lista.map((a, i) => {
+        const tempo = a.duracao ? ' · ' + App().fmtDuracao(a.duracao) : '';
+        const tocar = a.blob ? `<audio controls preload="none" src="${App().urlDe(a.blob)}"></audio>`
+          : a.enviado ? `<div class="ouvir-audio"><button class="botao pequeno" type="button" data-ouvir="${esc(a.id)}">▶️ Ouvir</button>` +
+            '<small class="dica">Guardado no servidor (precisa de internet).</small></div>'
+            : '<small class="dica">Este áudio está no celular de quem gravou.</small>';
+        const apagar = VR.somenteLeitura ? '' :
+          `<button type="button" class="botao-apagar-audio" data-remover-audio="${esc(a.chave)}" aria-label="Apagar o áudio ${i + 1}" title="Apagar este áudio">🗑️</button>`;
+        return `<div class="audio-item"><div class="audio-topo"><span>🎤 Áudio ${i + 1}${tempo}</span>${apagar}</div>${tocar}</div>`;
+      }).join('') + '</div>';
+  }
+  async function removerAudio(chave) {
+    if (VR.lendo) return;
+    if (!(await App().confirmar('Apagar este áudio?', 'Apagar', 'Cancelar'))) return;
+    if (!VR) return;
+    const [tipo, id] = chave.split(/:(.+)/);
+    if (tipo === 'e') VR.removerIds.push(id);
+    else VR.audiosNovos = VR.audiosNovos.filter(a => a.id !== id);
+    VR.alterado = true;
+    if (!audiosAtuais().length && VR.r.lerVoz) VR.r.lerVoz = false;
+    renderAudios();
+    atualizarBotaoVoz();
+    renderIA();
   }
 
   async function alternarGravacao() {
     if (Gravador.gravando()) { await pararGravacao(true); return; }
     if (VR.lendo) return;
     if (!Gravador.suportado()) { toast('Este navegador não permite gravar áudio. Use o Chrome.', 4500); return; }
-    if (audioAtual() && !(await App().confirmar('Gravar de novo? O áudio atual será trocado pelo novo.', 'Gravar de novo', 'Cancelar'))) return;
     try {
       await Gravador.iniciar();
     } catch (e) {
@@ -1279,7 +1366,7 @@ const Veiculos = (() => {
     const tique = () => { const x = $('vr-voz'); if (x && Gravador.gravando()) x.textContent = `⏹ Parar (${App().fmtDuracao(Gravador.segundos())})`; };
     tique();
     VR.relogio = setInterval(tique, 500);
-    if ($('vr-nota')) $('vr-nota').disabled = true;
+    if ($('vr-foto')) $('vr-foto').disabled = true;
   }
 
   /** lerJa: no Wi-Fi a IA lê na hora (ao salvar no meio da gravação, a leitura fica para a sincronização). */
@@ -1289,36 +1376,39 @@ const Veiculos = (() => {
     const res = await Gravador.parar();
     if (!VR || VR.token !== token) return;
     atualizarBotaoVoz();
-    if ($('vr-nota')) $('vr-nota').disabled = false;
-    if (!res) { toast('Nada foi gravado. Toque em “Lançar por voz” para tentar de novo.'); return; }
-    if (!VR.audioNovo) { const antigo = audioAtual(); if (antigo) VR.removerIds.push(antigo.id); } // o áudio que já estava salvo sai
-    VR.audioNovo = { id: novoId(), blob: res.blob, duracao: res.duracao, mime: res.blob.type || 'audio/webm' };
+    if ($('vr-foto')) $('vr-foto').disabled = false;
+    if (!res) { toast('Nada foi gravado. Toque em “Gravar áudio” para tentar de novo.'); return; }
+    // cada áudio novo fica guardado junto com os anteriores (V6)
+    VR.audiosNovos.push({ id: novoId(), blob: res.blob, duracao: res.duracao, mime: res.blob.type || 'audio/webm' });
     VR.alterado = true;
     VR.r.lerVoz = true;
     VR.leituraAgora = null;
     VR.msgLeitura = null;
     atualizarBotaoVoz();
-    if (lerJa && Sync.conexao() === 'wifi') lerAgora(['voz']);
+    renderAudios();
+    if (lerJa && Sync.conexao() === 'wifi') lerAgora();
     else renderIA();
   }
 
-  function escolherFotoNota() {
+  /** Fotos do abastecimento: tirar ou escolher na galeria (tocar fora fecha). */
+  function escolherFotos() {
     return new Promise((ok) => {
-      App().abrirDialogo('<div class="fundo-dialogo"><div class="dialogo" role="dialog"><h2>Nota do posto</h2>' +
-        '<p>Tire a foto da nota (ou do cupom) do posto. Com o QR Code, os dados vêm do site da SEFAZ; sem ele, a IA lê a foto.</p>' +
+      App().abrirDialogo('<div class="fundo-dialogo"><div class="dialogo" role="dialog"><h2>Fotos do abastecimento</h2>' +
+        '<p>Tire a foto da <b>nota</b> (ou do cupom), da <b>bomba</b> (valor do litro, litros e total) ou do <b>painel</b> (hodômetro). ' +
+        'A IA descobre qual é qual. Com o QR Code da nota, os dados vêm do site da SEFAZ.</p>' +
         '<div class="botoes coluna"><button class="botao primario" type="button" id="dlg-nota-camera">📷 Tirar foto</button>' +
-        '<label class="botao arquivo">🖼️ Escolher da galeria<input type="file" accept="image/*" id="dlg-nota-galeria"></label>' +
-        '<button class="botao" type="button" id="dlg-nota-cancelar">Cancelar</button></div></div></div>', () => ok(null));
+        '<label class="botao arquivo">🖼️ Escolher da galeria<input type="file" accept="image/*" multiple id="dlg-nota-galeria"></label>' +
+        '<button class="botao" type="button" id="dlg-nota-cancelar">Cancelar</button></div></div></div>', () => ok(null), { fora: true });
       $('dlg-nota-camera').onclick = () => { App().fecharDialogo(); ok({ modo: 'camera' }); };
       $('dlg-nota-cancelar').onclick = () => { App().fecharDialogo(); ok(null); };
       $('dlg-nota-galeria').onchange = (e) => { const input = e.target; App().fecharDialogo(); ok({ modo: 'galeria', input }); };
     });
   }
 
-  async function lerNotaDoPosto() {
+  async function adicionarFotosAbastecimento() {
     if (VR.lendo || Gravador.gravando()) return;
     const token = VR.token;
-    const escolha = await escolherFotoNota();
+    const escolha = await escolherFotos();
     if (!escolha) return;
     const novas = [];
     if (escolha.modo === 'camera') await App().tirarFotos(novas, OPCOES_NOTA_POSTO);
@@ -1326,13 +1416,13 @@ const Veiculos = (() => {
     if (!VR || VR.token !== token || !novas.length) return;
     VR.fotosNovas.push(...novas);
     const comQr = novas.find(f => f.qr);
-    if (comQr) VR.r.qrNota = comQr.qr;
+    if (comQr && !VR.r.qrNota) VR.r.qrNota = comQr.qr;
     VR.alterado = true;
     VR.r.lerNota = true;
     VR.leituraAgora = null;
     VR.msgLeitura = null;
     await renderFotos();
-    if (Sync.conexao() === 'wifi') lerAgora(['nota']);
+    if (Sync.conexao() === 'wifi') lerAgora();
     else renderIA();
   }
 
@@ -1344,50 +1434,60 @@ const Veiculos = (() => {
     if (a.blob) return Sync.blobParaBase64(a.blob);
     return Sync.blobParaBase64(await App().baixarArquivo(a.id)); // já saiu do celular: vem do servidor
   }
-  async function fotosParaLeitura() {
-    const lista = [];
-    const existentes = VR.arquivos.filter(a => a.tipo === 'foto' && !VR.removerIds.includes(a.id))
-      .sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0));
-    for (const a of existentes) lista.push({ mime: a.mime || 'image/jpeg', base64: await base64DoArquivo(a) });
-    for (const f of VR.fotosNovas) lista.push({ mime: 'image/jpeg', base64: await Sync.blobParaBase64(f.blob) });
-    return lista;
+
+  /** O que ainda falta ler, em palavras ("o áudio", "as fotos", "os áudios e a foto"...). */
+  function oQueFaltaLer() {
+    const nA = audiosAtuais().length;
+    const nF = fotosAtuais().length || (VR.r.qrNota ? 1 : 0);
+    const a = VR.r.lerVoz && nA ? (nA > 1 ? 'os áudios' : 'o áudio') : '';
+    const f = VR.r.lerNota && nF ? (nF > 1 ? 'as fotos' : 'a foto') : '';
+    const plural = !!(a && f) || (a && nA > 1) || (f && nF > 1);
+    const fem = !a && !!f;
+    return {
+      oque: [a, f].filter(Boolean).join(' e ') || 'o abastecimento',
+      lido: (fem ? 'lida' : 'lido') + (plural ? 's' : ''), vai: plural ? 'vão' : 'vai', foi: plural ? 'foram' : 'foi'
+    };
   }
 
-  /** Passa para a tela o que a leitura trouxe: só nos campos vazios ou que o app preencheu sozinho. */
+  /** Passa para a tela o que a leitura trouxe: só nos campos vazios, preenchidos pelo app ou lidos antes pela IA. */
   function aplicarLeituraNoForm(resp) {
     const c = (resp && resp.campos) || {};
-    const livre = (id, k) => { const el = $(id); return !!el && (!el.value || VR.auto.has(k)); };
+    const livre = (id, k) => { const el = $(id); return !!el && (!el.value || VR.auto.has(k) || VR.ia.has(k)); };
+    const usou = (k) => { VR.auto.delete(k); VR.ia.add(k); };
     if (c.combustivel && livre('vr-combustivel', 'combustivel')) {
       const sel = $('vr-combustivel');
       if (!Array.from(sel.options).some(o => o.value === c.combustivel)) sel.add(new Option(c.combustivel, c.combustivel));
       sel.value = c.combustivel;
-      VR.auto.delete('combustivel');
+      usou('combustivel');
       aoMudarCombustivel();
     }
-    if (c.hodometro != null && livre('vr-km', 'hodometro')) { $('vr-km').value = textoKm(c.hodometro); VR.auto.delete('hodometro'); }
-    // os três valores: a leitura entra onde a pessoa não digitou (vazio, calculado ou preço sugerido)
+    if (c.hodometro != null && livre('vr-km', 'hodometro')) { $('vr-km').value = textoKm(c.hodometro); usou('hodometro'); }
+    // os três valores: a leitura entra onde a pessoa não digitou (vazio, calculado, preço sugerido ou lido antes)
     const lidos = [];
     [['precoLitro', c.precoLitro, 3], ['litros', c.litros, 3], ['valor', c.valorTotal, 2]].forEach(([k, v, casas]) => {
       if (!(v > 0) || !$(ID_TRES[k]) || VR.calc[k] === 'user') return;
       $(ID_TRES[k]).value = paraMascara(v, casas);
-      VR.calc[k] = 'user';
+      VR.calc[k] = 'ia';
+      usou(k);
       lidos.push(k);
     });
     // a leitura trouxe os três e eles batem: um deles continua automático (se a pessoa mudar outro, ele é refeito)
     const T = ['precoLitro', 'litros', 'valor'];
     const vals = {};
     T.forEach((k) => { vals[k] = daMascara($(ID_TRES[k])); });
-    if (lidos.length && T.every(k => VR.calc[k] === 'user') && !difValores(vals.precoLitro, vals.litros, vals.valor)) {
-      VR.calc[['litros', 'precoLitro', 'valor'].find(k => lidos.includes(k))] = 'calc';
+    if (lidos.length && T.every(k => VR.calc[k] === 'user' || VR.calc[k] === 'ia') && !difValores(vals.precoLitro, vals.litros, vals.valor)) {
+      const k = ['litros', 'precoLitro', 'valor'].find(x => lidos.includes(x));
+      VR.calc[k] = 'calc';
+      VR.ia.delete(k);
     }
     if (c.formaPagamento && livre('vr-pagamento', 'formaPagamento')) {
       const sel = $('vr-pagamento');
       if (!Array.from(sel.options).some(o => o.value === c.formaPagamento)) sel.add(new Option(c.formaPagamento, c.formaPagamento));
       sel.value = c.formaPagamento;
-      VR.auto.delete('formaPagamento');
+      usou('formaPagamento');
     }
-    if (c.data && livre('vr-data', 'data')) { definirData($('vr-data'), c.data); VR.auto.delete('data'); }
-    if (c.local && livre('vr-local', 'local')) { $('vr-local').value = c.local; VR.auto.delete('local'); VR.localPendente = false; atualizarXLocal(); }
+    if (c.data && livre('vr-data', 'data')) { definirData($('vr-data'), c.data); usou('data'); }
+    if (c.local && livre('vr-local', 'local')) { $('vr-local').value = c.local; usou('local'); VR.localPendente = false; atualizarXLocal(); }
     if (c.tanqueCheio === true && $('vr-tanque') && !$('vr-tanque').checked && VR.auto.has('tanqueCheio')) {
       $('vr-tanque').checked = true;
       VR.auto.delete('tanqueCheio');
@@ -1398,68 +1498,68 @@ const Veiculos = (() => {
     atualizarAvisoKm();
   }
 
-  /** Lê agora (no Wi-Fi é automático; nos dados móveis, só se a pessoa pedir). */
-  async function lerAgora(modos) {
-    if (!VR || VR.lendo || !modos.length) return;
+  /** Lê agora todos os áudios e fotos juntos (no Wi-Fi é automático; nos dados móveis, só se a pessoa pedir). */
+  async function lerAgora() {
+    if (!VR || VR.lendo) return;
     const token = VR.token;
+    const audios = audiosAtuais();
+    const fotos = fotosAtuais();
+    const qr = qrAtual();
+    if (!audios.length && !fotos.length && !qr) { VR.r.lerVoz = false; VR.r.lerNota = false; renderIA(); return; }
     VR.msgLeitura = null;
-    const leitura = { transcricao: '', avisos: [], fontes: [] };
-    let leu = false;
+    VR.lendo = 'tudo';
     travarBotoesLeitura(true);
-    for (const modo of modos) {
-      VR.lendo = modo;
-      renderIA();
-      const flag = modo === 'voz' ? 'lerVoz' : 'lerNota';
-      try {
-        let resp;
-        if (modo === 'voz') {
-          const a = audioAtual();
-          if (!a) { VR.r.lerVoz = false; continue; }
-          const base64 = await base64DoArquivo(a);
-          resp = await Api.chamar('lerVeiculo', { modo: 'audio', mime: a.mime || 'audio/webm', base64 }, { tempoMs: 150000 });
-        } else {
-          resp = await Sync.lerNotaPosto(qrAtual(), fotosParaLeitura);
-        }
-        if (!VR || VR.token !== token) return; // a pessoa saiu da tela: a leitura fica para a sincronização
-        aplicarLeituraNoForm(resp);
-        VR.r[flag] = false;
-        if (modo === 'voz') {
-          leitura.transcricao = resp.transcricao || '';
-          VR.r.transcricao = leitura.transcricao;
-          if (!VR.r.fonte) VR.r.fonte = 'voz';
-        } else {
-          VR.r.fonte = resp.fonte || 'ia';
-          if (resp.chave) VR.r.chaveNota = resp.chave;
-        }
-        const av = Sync.avisosDaLeitura(resp);
-        if (av) leitura.avisos.push(av);
-        leitura.fontes.push(modo === 'voz' ? 'voz' : (resp.fonte || 'ia'));
-        leu = true;
-      } catch (e) {
-        if (!VR || VR.token !== token) return;
-        const oque = modo === 'voz' ? 'O áudio fica guardado e é lido' : 'A nota fica guardada e é lida';
-        if (e instanceof Api.ErroServidor && ['ia_falhou', 'dados_invalidos', 'arquivo_inexistente'].includes(e.codigo)) {
-          VR.r[flag] = false;
-          VR.msgLeitura = { classe: 'vermelho', texto: `<b>${modo === 'voz' ? 'A IA não conseguiu entender o áudio' : 'Não foi possível ler a nota'}.</b> Preencha você mesmo.` };
-        } else if (e instanceof Api.ErroServidor && e.codigo === 'ia_limite') {
-          VR.msgLeitura = { texto: `<b>O limite gratuito da IA foi atingido agora.</b> ${oque} mais tarde, na sincronização. Você pode salvar assim mesmo.` };
-        } else if (e instanceof Api.ErroRede) {
-          VR.msgLeitura = { texto: `<b>Sem conexão com o servidor.</b> ${oque} na próxima sincronização. Você pode salvar assim mesmo.` };
-        } else {
-          VR.msgLeitura = { texto: `<b>${esc(App().mensagemErroGeral(e))}</b> ${oque} depois, na sincronização.` };
-        }
+    renderIA();
+    try {
+      const resp = await Sync.lerAbastecimento({
+        audios: audios.map(a => ({ mime: a.mime || 'audio/webm', base64: () => base64DoArquivo(a) })),
+        fotos: fotos.map(f => ({ mime: f.mime || 'image/jpeg', qr: !!f.qr, base64: () => base64DoArquivo(f) })),
+        qr, lerVoz: !!VR.r.lerVoz, lerNota: !!VR.r.lerNota
+      });
+      if (!VR || VR.token !== token) return; // a pessoa saiu da tela: a leitura fica para a sincronização
+      aplicarLeituraNoForm(resp);
+      VR.r.lerVoz = false;
+      VR.r.lerNota = false;
+      if (resp.transcricao) VR.r.transcricao = resp.transcricao;
+      if (resp.fonte) VR.r.fonte = resp.fonte;
+      if (resp.chave) VR.r.chaveNota = resp.chave;
+      const avisos = [Sync.avisosDaLeitura(resp)];
+      if (resp.falhas && resp.falhas.length) avisos.push(resp.falhas.join(' ') + ' Preencha você mesmo o que faltar.');
+      VR.r.resumoLeitura = Sync.resumoDaLeitura(resp);
+      VR.leituraAgora = { transcricao: resp.transcricao || '', avisos: avisos.filter(Boolean).join(' '), resumo: VR.r.resumoLeitura };
+      VR.r.observacao = VR.leituraAgora.avisos.slice(0, 500); // vai junto para o servidor (ex.: outros itens da nota)
+    } catch (e) {
+      if (!VR || VR.token !== token) return;
+      const { oque, lido, foi } = oQueFaltaLer();
+      const guardado = `${maiuscula(oque)} ${foi === 'foram' ? 'ficam' : 'fica'} ${lido.replace('lid', 'guardad')}`; // "o áudio fica guardado", "as fotos ficam guardadas"
+      if (e instanceof Api.ErroServidor && ['ia_falhou', 'dados_invalidos', 'arquivo_inexistente'].includes(e.codigo)) {
+        VR.r.lerVoz = false;
+        VR.r.lerNota = false;
+        VR.msgLeitura = { classe: 'vermelho', texto: `<b>A IA não conseguiu ler ${oque}.</b> Preencha você mesmo.` };
+      } else if (e instanceof Api.ErroServidor && e.codigo === 'ia_limite') {
+        VR.msgLeitura = { texto: `<b>O limite gratuito da IA foi atingido agora.</b> ${guardado} e ${foi === 'foram' ? 'são' : 'é'} ${lido} mais tarde, na sincronização. Você pode salvar assim mesmo.` };
+      } else if (e instanceof Api.ErroRede) {
+        VR.msgLeitura = { texto: `<b>Sem conexão com o servidor.</b> ${guardado} e ${foi === 'foram' ? 'são' : 'é'} ${lido} na próxima sincronização. Você pode salvar assim mesmo.` };
+      } else {
+        VR.msgLeitura = { texto: `<b>${esc(App().mensagemErroGeral(e))}</b> ${guardado} e ${foi === 'foram' ? 'são' : 'é'} ${lido} depois, na sincronização.` };
       }
     }
     VR.lendo = '';
-    if (leu) {
-      VR.leituraAgora = { transcricao: leitura.transcricao, avisos: leitura.avisos.join(' '), fontes: leitura.fontes };
-      VR.r.observacao = VR.leituraAgora.avisos.slice(0, 500); // vai junto para o servidor (ex.: outros itens da nota)
-    }
     travarBotoesLeitura(false);
     renderIA();
   }
 
-  /** Caixa de cima do abastecimento: leitura em andamento, esperando, resultado, áudio. */
+  /** De onde vieram os dados de um abastecimento já lido. */
+  function textoFonte(f) {
+    if (f === 'voz') return 'Lançado por voz.';
+    if (f === 'sefaz') return 'Dados lidos da nota pelo site da SEFAZ.';
+    if (f === 'ia') return 'Dados lidos da nota pela IA.';
+    const p = String(f || '').split('+');
+    if (!f) return '';
+    return 'Dados lidos pela IA' + (p.includes('sefaz') ? ' e pelo site da SEFAZ (QR Code da nota)' : '') + '.';
+  }
+
+  /** Caixa de cima do abastecimento: leitura em andamento, esperando, resultado. */
   function renderIA() {
     const el = $('vr-ia');
     if (!el || !VR) return;
@@ -1468,16 +1568,14 @@ const Veiculos = (() => {
     const partes = [];
     let classe = '';
     if (VR.lendo) {
-      partes.push(`<b>⏳ ${VR.lendo === 'voz' ? 'Lendo o áudio…' : 'Lendo a nota…'}</b> A IA vai preencher só os campos que estão vazios.`);
+      partes.push('<b>⏳ Lendo os áudios e as fotos…</b> A IA vai preencher só os campos que estão vazios.');
     } else if (pendente) {
       classe = 'laranja';
-      const oque = r.lerVoz && r.lerNota ? 'o áudio e a nota' : r.lerVoz ? 'o áudio' : 'a nota';
-      const lido = r.lerVoz && r.lerNota ? 'lidos' : r.lerVoz ? 'lido' : 'lida';
-      const vai = r.lerVoz && r.lerNota ? 'vão' : 'vai';
+      const { oque, lido, vai, foi } = oQueFaltaLer();
       const con = Sync.conexao();
       if (VR.msgLeitura) partes.push(VR.msgLeitura.texto);
       else if (con === 'offline') partes.push(`<b>Sem internet:</b> ${oque} ${vai} ser ${lido} quando o celular estiver conectado. Você pode salvar assim mesmo.`);
-      else if (con === 'wifi') partes.push(`<b>${maiuscula(oque)} ainda não ${r.lerVoz && r.lerNota ? 'foram' : 'foi'} ${lido}.</b>`);
+      else if (con === 'wifi') partes.push(`<b>${maiuscula(oque)} ainda não ${foi} ${lido}.</b>`);
       else partes.push(`<b>Sem Wi-Fi:</b> ${oque} ${vai} ser ${lido} quando você tocar nas setas da tela inicial (no Wi-Fi é automático). Você pode salvar assim mesmo.`);
       if (con !== 'offline') {
         partes.push(`<div><button class="botao pequeno" type="button" id="vr-ler-agora">${VR.msgLeitura ? 'Tentar de novo' : con === 'wifi' ? 'Ler agora' : 'Ler agora pelos dados móveis'}</button></div>`);
@@ -1485,44 +1583,33 @@ const Veiculos = (() => {
     } else {
       if (VR.msgLeitura) { partes.push(VR.msgLeitura.texto); classe = VR.msgLeitura.classe || ''; }
       else if (VR.leituraAgora) {
-        const f = VR.leituraAgora.fontes || [];
-        partes.push(f.length === 1 && f[0] === 'sefaz'
-          ? '<b>✓ A nota foi lida no site da SEFAZ (pelo QR Code)</b> e preencheu os campos que estavam vazios. Confira antes de salvar.'
-          : f.length === 1 && f[0] !== 'voz'
-            ? '<b>✓ A IA leu a foto da nota</b> e preencheu os campos que estavam vazios. Confira antes de salvar.'
-            : '<b>✓ A IA preencheu os campos que estavam vazios.</b> Confira antes de salvar.');
-      }
-      else if (r.status === 'revisar') {
-        partes.push(`<b>${r.fonte === 'voz' ? 'O áudio foi lido' : 'A nota foi lida'}.</b> A IA preencheu os campos que estavam vazios. Confira e toque em Confirmar.`);
+        const res = VR.leituraAgora.resumo;
+        partes.push(res ? `<b>✓ Leitura feita:</b> ${esc(res)}. Os campos que estavam vazios foram preenchidos. Confira antes de salvar.`
+          : '<b>✓ A IA preencheu os campos que estavam vazios.</b> Confira antes de salvar.');
+      } else if (r.status === 'revisar') {
+        partes.push((r.resumoLeitura ? `<b>Leitura feita:</b> ${esc(r.resumoLeitura)}.` : '<b>A leitura foi feita.</b>') +
+          ' A IA preencheu os campos que estavam vazios. Confira e toque em Confirmar.');
       } else if (r.fonte) {
-        partes.push(r.fonte === 'voz' ? 'Lançado por voz.' : r.fonte === 'sefaz' ? 'Dados lidos da nota pelo site da SEFAZ.' : 'Dados lidos da nota pela IA.');
+        partes.push(textoFonte(r.fonte));
       }
       const transcricao = (VR.leituraAgora && VR.leituraAgora.transcricao) || r.transcricao;
       if (transcricao) partes.push(`<div class="transcricao">“${esc(transcricao)}”</div>`);
       const avisos = VR.leituraAgora ? VR.leituraAgora.avisos : (r.status === 'revisar' || r.fonte ? r.observacao : '');
       if (avisos) partes.push(`<div class="dica">${esc(avisos)}</div>`);
     }
-    const audio = audioAtual();
-    if (audio && !VR.lendo) {
-      if (audio.blob) partes.push(`<audio controls src="${App().urlDe(audio.blob)}"></audio>`);
-      else if (audio.enviado) {
-        partes.push(`<div class="ouvir-audio" id="vr-ouvir-caixa"><button class="botao pequeno" type="button" id="vr-ouvir" data-arquivo="${esc(audio.id)}">▶️ Ouvir o áudio</button>` +
-          '<small class="dica">O áudio está guardado no servidor (precisa de internet).</small></div>');
-      }
-    }
     el.innerHTML = partes.length ? `<div class="caixa-ia ${classe}">${partes.join(' ')}</div>` : '';
   }
 
   async function ouvirAudio(b) {
     b.disabled = true;
-    b.textContent = 'Baixando o áudio…';
+    b.textContent = 'Baixando…';
     try {
-      const blob = await App().baixarArquivo(b.dataset.arquivo);
-      const caixa = $('vr-ouvir-caixa');
-      if (caixa) caixa.innerHTML = `<audio controls autoplay src="${App().urlDe(blob)}"></audio>`;
+      const blob = await App().baixarArquivo(b.dataset.ouvir);
+      const caixa = b.closest('.ouvir-audio');
+      if (caixa) caixa.outerHTML = `<audio controls autoplay src="${App().urlDe(blob)}"></audio>`;
     } catch (err) {
       toast(App().erroAoBaixar(err, 'o áudio'), 5000);
-      if (document.body.contains(b)) { b.disabled = false; b.textContent = '▶️ Ouvir o áudio'; }
+      if (document.body.contains(b)) { b.disabled = false; b.textContent = '▶️ Ouvir'; }
     }
   }
 
@@ -1593,6 +1680,7 @@ const Veiculos = (() => {
     r.lerVoz = !!r.lerVoz;
     r.lerNota = !!r.lerNota;
     r.automaticos = pendente ? Array.from(VR.auto) : [];
+    r.lidosIA = Array.from(VR.ia); // fica só neste celular (V6)
     if (VR.gps) { r.lat = VR.gps.lat; r.lng = VR.gps.lng; }
     // local que ficou só com as coordenadas: o endereço é buscado na sincronização
     r.localPendente = !!(VR.localPendente && r.local && r.local === VR.localCoordenadas);
@@ -1615,14 +1703,15 @@ const Veiculos = (() => {
         const f = VR.fotosNovas[i];
         await Banco.gravar('arquivos', {
           id: f.id, lancamentoId: r.id, tipo: 'foto', mime: 'image/jpeg', blob: f.blob,
-          tamanho: f.blob.size, criadoEm: agora + i, enviado: false
+          tamanho: f.blob.size, criadoEm: agora + i, enviado: false, qr: f.qr || ''
         });
       }
-      if (VR.audioNovo) {
-        const a = VR.audioNovo;
+      // todos os áudios novos ficam guardados, na ordem em que foram gravados (V6)
+      for (let i = 0; i < VR.audiosNovos.length; i++) {
+        const a = VR.audiosNovos[i];
         await Banco.gravar('arquivos', {
           id: a.id, lancamentoId: r.id, tipo: 'audio', mime: a.mime, blob: a.blob,
-          tamanho: a.blob.size, duracao: a.duracao, criadoEm: agora, enviado: false
+          tamanho: a.blob.size, duracao: a.duracao, criadoEm: agora + i, enviado: false
         });
       }
       for (const id of VR.removerIds) {
@@ -1637,7 +1726,7 @@ const Veiculos = (() => {
       if (document.body.contains(botao)) botao.disabled = false;
     }
     if (pendente) {
-      const oque = r.lerVoz && r.lerNota ? 'o áudio e a nota' : r.lerVoz ? 'o áudio' : 'a nota';
+      const { oque } = oQueFaltaLer();
       toast(Sync.conexao() === 'wifi' ? `${t.salvo}. A IA vai ler ${oque} agora.`
         : `${t.salvo} no celular. A IA lê ${oque} quando você tocar nas setas da tela inicial (no Wi-Fi é automático).`, 5000);
     } else {
@@ -1645,7 +1734,7 @@ const Veiculos = (() => {
     }
     VR.alterado = false;
     VR.fotosNovas = [];
-    VR.audioNovo = null;
+    VR.audiosNovos = [];
     VR.token = null;
     App().voltar();
     App().agendarSync(800);
@@ -1670,7 +1759,7 @@ const Veiculos = (() => {
     }
     VR.alterado = false;
     VR.fotosNovas = [];
-    VR.audioNovo = null;
+    VR.audiosNovos = [];
     VR.token = null;
     if (precisaEnviar) toastSalvo('Excluído');
     else toast('Excluído.');
@@ -1687,7 +1776,7 @@ const Veiculos = (() => {
     }
     VR.alterado = true;
     const k = CAMPO[e.target.id];
-    if (k) VR.auto.delete(k);
+    if (k) { VR.auto.delete(k); VR.ia.delete(k); }
     if (e.target.id === 'vr-local') { VR.localPendente = false; atualizarXLocal(); } // a pessoa escreveu o local
     if (e.target.id === 'vr-combustivel' && e.type === 'change') aoMudarCombustivel();
     if (TRES[e.target.id] && e.type === 'input') recalcularTres(e.target.id);
@@ -1714,12 +1803,14 @@ const Veiculos = (() => {
       case 'vr-salvar': salvarRegistro(); break;
       case 'vr-excluir': excluirRegistro(); break;
       case 'vr-voz': alternarGravacao(); break;
-      case 'vr-nota': lerNotaDoPosto(); break;
-      case 'vr-ler-agora': lerAgora([VR.r.lerVoz ? 'voz' : '', VR.r.lerNota ? 'nota' : ''].filter(Boolean)); break;
+      case 'vr-foto': adicionarFotosAbastecimento(); break;
+      case 'vr-ler-agora': lerAgora(); break;
       case 'vr-gps': capturarLocal(VR.token, true); break;
       case 'vr-camera': tirarFotoGaleria(); break;
-      case 'vr-ouvir': ouvirAudio(b); break;
-      default: break;
+      default:
+        if (b.dataset.ouvir) ouvirAudio(b);
+        else if (b.dataset.removerAudio && !VR.somenteLeitura) removerAudio(b.dataset.removerAudio);
+        break;
     }
   }
 
@@ -1856,6 +1947,40 @@ const Veiculos = (() => {
   }
 
   // ------------------------------------------------------------------
+  //  Tela inicial (V6): os gastos dos veículos que a pessoa lançou (menos a Galeria)
+  //  entram na lista e nos totais; tocando, o gasto abre direto.
+  // ------------------------------------------------------------------
+  async function paraInicio() {
+    const veiculos = new Map((await Banco.todos('veiculos')).filter(v => !v.excluirPendente).map(v => [v.id, v]));
+    const regs = (await Banco.todos('registros'))
+      .filter(r => !r.excluirPendente && r.tipo !== 'galeria' && r.meu !== false && veiculos.has(r.veiculoId));
+    if (!regs.length) return [];
+    const arqs = await arquivosDe(regs.map(r => r.id));
+    // ⚠️ do hodômetro: comparando com os outros gastos do mesmo veículo
+    const km = new Map();
+    const porVeiculo = {};
+    (await Banco.todos('registros')).filter(r => !r.excluirPendente).forEach((r) => { (porVeiculo[r.veiculoId] = porVeiculo[r.veiculoId] || []).push(r); });
+    Object.values(porVeiculo).forEach((lista) => { analisarKm(lista).forEach((v, k) => km.set(k, v)); });
+    return regs.map((r) => {
+      const [a, m, d] = String(r.data || '').split('-').map(Number);
+      // o gasto de hoje entra na hora em que foi lançado; o de outro dia, ao meio-dia daquele dia
+      let quando = a ? new Date(a, m - 1, d, 12).getTime() : (r.criadoEm || 0);
+      if (r.criadoEm && App().chaveDia(r.criadoEm) === r.data) quando = r.criadoEm;
+      return { quando, valor: r.valor > 0 ? Number(r.valor) : null, html: cartaoGasto(r, arqs[r.id] || [], km.get(r.id), false, '', veiculos.get(r.veiculoId)) };
+    });
+  }
+
+  /** Para o pedido de melhoria (V6): qual tipo de gasto (ou menu) a tela dos veículos está mostrando. */
+  function tipoNaTela() {
+    const tela = App().telaAtual();
+    const d = dadosAtuais();
+    if (tela === 'v-registro') return (VR && VR.r && VR.r.tipo) || d.tipo || '';
+    if (tela === 'v-lista') return d.tipo || '';
+    if (tela === 'v-menu') return d.menu || '';
+    return '';
+  }
+
+  // ------------------------------------------------------------------
   //  Abastecimentos lidos pela IA esperando a revisão (aviso na tela inicial)
   // ------------------------------------------------------------------
   async function paraRevisar() {
@@ -1885,6 +2010,8 @@ const Veiculos = (() => {
       if (c) ir('veiculo', { veiculoId: c.dataset.veiculo });
     });
     $('vx-config').onclick = () => configDoVeiculo();
+    $('vx-info').onclick = () => infoDoVeiculo();
+    $('vf-obs').addEventListener('input', contarLetrasObs);
     $('vx-mais').onclick = () => menuDoVeiculo();
     const abrirCartao = (e) => {
       const aviso = e.target.closest('[data-aviso]');
@@ -1935,7 +2062,7 @@ const Veiculos = (() => {
 
   return {
     ehTela, mostrar, podeSair, aoSincronizar, paraRevisar,
-    abrirLista,
+    abrirLista, paraInicio, tipoNaTela, explicarAviso,
     abrirRegistro: (id) => ir('v-registro', { registroId: id }),
     // usados nos testes
     _textoMascara: textoMascara, _normalizarPlaca: normalizarPlaca, _analisarKm: analisarKm,
