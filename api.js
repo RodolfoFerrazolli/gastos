@@ -3,7 +3,7 @@
 // =====================================================================
 // Versão do app (fica aqui, e não no config.js, para o config.js de quem já
 // instalou continuar valendo nas atualizações).
-const VERSAO_DO_APP = '6';
+const VERSAO_DO_APP = '7';
 
 const Api = (() => {
   class ErroRede extends Error {}
@@ -15,7 +15,7 @@ const Api = (() => {
   }
 
   // Erros que impedem qualquer sincronização (não adianta tentar o próximo item).
-  const ERROS_GERAIS = ['codigo_invalido', 'servidor_nao_configurado', 'sem_url', 'resposta_invalida', 'aparelho_invalido', 'sessao_invalida'];
+  const ERROS_GERAIS = ['codigo_invalido', 'servidor_nao_configurado', 'sem_url', 'resposta_invalida', 'aparelho_invalido', 'sessao_invalida', 'conta_excluida'];
 
   function urlConfigurada() {
     const u = (typeof CONFIG !== 'undefined' && CONFIG.URL_SERVIDOR) || '';

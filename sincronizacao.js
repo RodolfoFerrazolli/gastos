@@ -43,7 +43,7 @@ const Sync = (() => {
     return 'desconhecida';
   }
 
-  function avisar(estado, extra) {
+  function avisarSync(estado, extra) {
     window.dispatchEvent(new CustomEvent('sync-estado', { detail: Object.assign({ estado }, extra || {}) }));
   }
 
@@ -562,8 +562,10 @@ const Sync = (() => {
    * manual: a pessoa pediu (vale também nos dados móveis).
    * somenteBaixar: só busca as novidades do servidor, sem enviar nada (usado ao entrar na conta fora do Wi-Fi).
    */
-  async function sincronizar({ manual = false, somenteBaixar = false } = {}) {
+  async function sincronizar({ manual = false, somenteBaixar = false, silencioso = false } = {}) {
     if (rodando) return { ignorado: 'rodando' };
+    // silencioso (V7, puxar a tela): sem "Sincronizado" nem avisos de erro; só as setas da tela inicial giram
+    const avisar = (estado, extra) => avisarSync(estado, Object.assign({ silencioso }, extra || {}));
     const tipo = conexao();
     if (tipo === 'offline') { avisar('offline', { manual }); return { ignorado: 'offline' }; }
     if (!manual && !somenteBaixar && tipo !== 'wifi') { avisar('aguardando'); return { ignorado: 'sem_wifi' }; }
@@ -809,6 +811,13 @@ const Sync = (() => {
       const p = await Perfil.obter();
       if (p && e instanceof Api.ErroServidor && e.codigo === 'codigo_invalido') {
         p.codigoInvalido = true;
+        await Perfil.salvar(p);
+      }
+      if (p && p.token && e instanceof Api.ErroServidor && e.codigo === 'conta_excluida') {
+        // V7: o organizador excluiu a conta. Os dados ficam no celular (se ele aceitar a pessoa de volta
+        // com os dados, ela entra de novo e continua de onde parou).
+        p.token = null;
+        p.contaExcluida = true;
         await Perfil.salvar(p);
       }
       if (p && p.token && e instanceof Api.ErroServidor && e.codigo === 'sessao_invalida') {

@@ -20,7 +20,7 @@ const Veiculos = (() => {
   const $ = (id) => document.getElementById(id);
   const App = () => window.App; // funções do app.js (que é carregado depois deste arquivo)
 
-  const TELAS = ['veiculos', 'veiculo-form', 'veiculo', 'v-menu', 'v-lista', 'v-registro', 'v-compartilhar'];
+  const TELAS = ['veiculos', 'veiculo-form', 'veiculo', 'v-menu', 'v-lista', 'v-registro', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho'];
   const COMBUSTIVEIS = ['Gasolina Comum', 'Gasolina Aditivada', 'Gasolina Premium', 'Etanol Comum', 'Etanol Aditivado',
     'Diesel S10', 'Diesel S500', 'GNV'];
   // sugestões no campo "Montadora" (dá para digitar outra)
@@ -84,6 +84,13 @@ const Veiculos = (() => {
   /** Quem pode mudar um gasto: quem lançou e o dono do veículo. */
   function podeAlterar(r, v) { return r.meu !== false || ehMeu(v); }
   function primeiroNome(n) { return String(n || '').trim().split(/\s+/)[0]; }
+  /** Quem lançou: o primeiro nome; de uma conta que o organizador excluiu (V7): "Maria (conta excluída)". */
+  function autorDe(participante) {
+    const p = String(participante || '').trim();
+    const excluida = /\(conta exclu[íi]da\)\s*$/i.test(p);
+    const nome = primeiroNome(p.replace(/\(conta exclu[íi]da\)\s*$/i, ''));
+    return nome && excluida ? nome + ' (conta excluída)' : nome;
+  }
   async function compartilhamentosDe(veiculoId) {
     const m = (await Banco.lerConfig('compartilhamentos', {})) || {};
     return m[veiculoId] || [];
@@ -272,6 +279,7 @@ const Veiculos = (() => {
       case 'v-lista': return renderLista(dados.veiculoId, dados.tipo);
       case 'v-registro': return prepararRegistro(dados);
       case 'v-compartilhar': return renderCompartilhar(dados.veiculoId);
+      case 'v-relatorio': case 'v-gastos': case 'v-desempenho': return Relatorio.preparar(tela, dados); // V7 (relatorio.js)
       default: return false;
     }
   }
@@ -322,7 +330,7 @@ const Veiculos = (() => {
   /** Terminou uma sincronização: as listas abertas mostram o que chegou. */
   async function aoSincronizar() {
     const tela = App().telaAtual();
-    if (!['veiculos', 'veiculo', 'v-menu', 'v-lista', 'v-compartilhar'].includes(tela) || navegando) return;
+    if (!['veiculos', 'veiculo', 'v-menu', 'v-lista', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho'].includes(tela) || navegando) return;
     const y = window.scrollY;
     if (!(await preparar(tela, dadosAtuais()))) { history.back(); return; } // o veículo foi excluído em outro celular
     if (App().telaAtual() === tela) window.scrollTo(0, y);
@@ -592,7 +600,7 @@ const Veiculos = (() => {
     const compartilhado = !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false);
     if (!compartilhado) return () => '';
     const eu = primeiroNome(((await Perfil.obter()) || {}).nome);
-    return (r) => primeiroNome(r.participante) || (r.meu === false ? '' : eu);
+    return (r) => autorDe(r.participante) || (r.meu === false ? '' : eu);
   }
 
   /** Engrenagem da tela do veículo: o dono edita e compartilha; quem recebeu pode sair do compartilhamento. */
@@ -695,9 +703,11 @@ const Veiculos = (() => {
       { valor: 'abastecimento', id: 'vx-abastecimento', icone: '⛽', texto: 'Abastecimento' },
       { valor: 'manutencao', id: 'vx-manutencao', icone: '🔧', texto: 'Manutenção' },
       { valor: 'despesas', id: 'vx-despesas', icone: '🧾', texto: 'Despesas' },
-      { valor: 'galeria', id: 'vx-galeria', icone: '📷', texto: 'Galeria' }
+      { valor: 'galeria', id: 'vx-galeria', icone: '📷', texto: 'Galeria' },
+      { valor: 'relatorio', id: 'vx-relatorio', icone: '📊', texto: 'Relatório', larga: true } // V7
     ]);
-    if (escolha === 'abastecimento') ir('v-registro', { veiculoId: d.veiculoId, tipo: 'abastecimento' });
+    if (escolha === 'relatorio') ir('v-relatorio', { veiculoId: d.veiculoId });
+    else if (escolha === 'abastecimento') ir('v-registro', { veiculoId: d.veiculoId, tipo: 'abastecimento' });
     else if (escolha === 'despesas') ir('v-menu', { veiculoId: d.veiculoId, menu: 'despesas' });
     else if (escolha) ir('v-lista', { veiculoId: d.veiculoId, tipo: escolha });
   }
@@ -1966,8 +1976,28 @@ const Veiculos = (() => {
       // o gasto de hoje entra na hora em que foi lançado; o de outro dia, ao meio-dia daquele dia
       let quando = a ? new Date(a, m - 1, d, 12).getTime() : (r.criadoEm || 0);
       if (r.criadoEm && App().chaveDia(r.criadoEm) === r.data) quando = r.criadoEm;
-      return { quando, valor: r.valor > 0 ? Number(r.valor) : null, html: cartaoGasto(r, arqs[r.id] || [], km.get(r.id), false, '', veiculos.get(r.veiculoId)) };
+      return { quando, valor: r.valor > 0 ? Number(r.valor) : null, html: cartaoGasto(r, arqs[r.id] || [], km.get(r.id), false, '', veiculos.get(r.veiculoId)),
+        resumo: resumoGasto(r, veiculos.get(r.veiculoId)), comHora: !!(r.criadoEm && App().chaveDia(r.criadoEm) === r.data) };
     });
+  }
+  function resumoGasto(r, v) {
+    const t = TIPOS[r.tipo] || { icone: '•', nome: r.tipo };
+    const nome = (r.tipo === 'manutencao' || r.tipo === 'outros') && r.descricao ? primeiraLinha(r.descricao) : t.nome;
+    return `${t.icone} ${nome}${v ? ' · ' + v.modelo : ''}`;
+  }
+
+  /** Cartão "Veículos" da tela inicial (V7): quantos veículos e o último gasto (de qualquer pessoa, sem a Galeria). */
+  async function resumoInicio() {
+    const vs = await listaVeiculos();
+    if (!vs.length) return { qtd: 0, texto: 'Cadastre seus veículos e lance os gastos de cada um' };
+    const ids = new Map(vs.map(v => [v.id, v]));
+    const ult = (await Banco.todos('registros')).filter(r => !r.excluirPendente && r.tipo !== 'galeria' && ids.has(r.veiculoId))
+      .sort((a, b) => compararData(b, a))[0];
+    const quem = vs.length === 1 ? vs[0].modelo : App().plural(vs.length, '1 veículo', '# veículos');
+    if (!ult) return { qtd: vs.length, texto: quem + ' · nenhum gasto lançado ainda' };
+    const t = TIPOS[ult.tipo] || { nome: ult.tipo };
+    const nome = (ult.tipo === 'manutencao' || ult.tipo === 'outros') && ult.descricao ? primeiraLinha(ult.descricao) : t.nome;
+    return { qtd: vs.length, texto: `${quem} · último gasto: ${nome}${vs.length > 1 ? ' (' + ids.get(ult.veiculoId).modelo + ')' : ''} · ${brl(ult.valor)}` };
   }
 
   /** Para o pedido de melhoria (V6): qual tipo de gasto (ou menu) a tela dos veículos está mostrando. */
@@ -2062,7 +2092,9 @@ const Veiculos = (() => {
 
   return {
     ehTela, mostrar, podeSair, aoSincronizar, paraRevisar,
-    abrirLista, paraInicio, tipoNaTela, explicarAviso,
+    abrirLista, paraInicio, resumoInicio, tipoNaTela, explicarAviso, ir,
+    // usados pelo relatório (relatorio.js, V7)
+    _util: { veiculoAtivo, gastosDo, abrirCalendario, definirData },
     abrirRegistro: (id) => ir('v-registro', { registroId: id }),
     // usados nos testes
     _textoMascara: textoMascara, _normalizarPlaca: normalizarPlaca, _analisarKm: analisarKm,

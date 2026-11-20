@@ -126,10 +126,36 @@
 
     <div id="alertas"></div>
 
+    <!-- V7: Hoje e Total, o cartão dos lançamentos (com os 3 botões) e o cartão dos veículos -->
+    <div class="numeros" id="ini-numeros"></div>
+    <div class="bloco-ini" id="btn-lancamentos" role="button" tabindex="0">
+      <div class="bloco-topo"><div><div class="bloco-titulo">🧾 Lançamentos</div><div class="bloco-sub" id="ini-ultimo"></div></div><span class="seta" aria-hidden="true">›</span></div>
+      <div class="tres-botoes">
+        <button type="button" id="btn-voz" aria-label="Lançar por voz">🎤<span>Voz</span></button>
+        <button type="button" id="btn-foto" aria-label="Lançar por foto">📷<span>Foto</span></button>
+        <button type="button" id="btn-texto" aria-label="Lançar por texto">✏️<span>Texto</span></button>
+      </div>
+    </div>
+    <div class="bloco-ini" id="btn-veiculos" role="button" tabindex="0">
+      <div class="bloco-topo"><div><div class="bloco-titulo">🚗 Veículos</div><div class="bloco-sub" id="ini-veiculos"></div></div><span class="seta" aria-hidden="true">›</span></div>
+    </div>
+    <div class="espaco-fim"></div>
+  </section>
+
+  <!-- ============ LANÇAMENTOS (V7): os 3 botões e o histórico de todos os gastos ============ -->
+  <section id="tela-lancamentos" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="lc-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Lançamentos</div><div class="topo-sub">Histórico de todos os gastos</div></div>
+      <span></span>
+    </header>
+    <div class="tres-botoes solto">
+      <button type="button" id="lc-voz" aria-label="Lançar por voz">🎤<span>Voz</span></button>
+      <button type="button" id="lc-foto" aria-label="Lançar por foto">📷<span>Foto</span></button>
+      <button type="button" id="lc-texto" aria-label="Lançar por texto">✏️<span>Texto</span></button>
+    </div>
     <div class="totais" id="totais"></div>
-    <div id="lista" class="com-fab"></div>
-    <!-- botão "+": lançar por voz, por foto, por texto e veículos -->
-    <button id="btn-mais" class="fab" type="button" aria-label="Lançar" title="Lançar"><span aria-hidden="true">+</span></button>
+    <div id="lista"></div>
   </section>
 
   <!-- ============ FORMULÁRIO (novo, editar, revisar) ============ -->
@@ -401,6 +427,35 @@
     </div>
   </section>
 
+  <!-- ============ RELATÓRIO DO VEÍCULO (V7) ============ -->
+  <section id="tela-v-relatorio" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="rl-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Relatório</div><div class="topo-sub" id="rl-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo"><div class="grade-opcoes" id="rl-opcoes">
+      <button class="opcao-grande" type="button" id="rl-gastos" data-rel="v-gastos"><span class="icone-grande">📊</span><b>Gastos</b><small>Lista e gráfico do que foi gasto no período</small></button>
+      <button class="opcao-grande" type="button" id="rl-desempenho" data-rel="v-desempenho"><span class="icone-grande">🚀</span><b>Desempenho</b><small>Km rodados, consumo e custo por km</small></button>
+    </div></div>
+  </section>
+  <section id="tela-v-gastos" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="rg-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Relatório · Gastos</div><div class="topo-sub" id="rg-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo" id="rg-corpo"></div>
+  </section>
+  <section id="tela-v-desempenho" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="rd-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Relatório · Desempenho</div><div class="topo-sub" id="rd-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo" id="rd-corpo"></div>
+  </section>
+
   <!-- ============ APP REMOVIDO ============ -->
   <section id="tela-removido" class="tela oculto">
     <div class="boas-vindas">
@@ -495,6 +550,7 @@
   <script src="visor.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="veiculos.js"></script>
+  <script src="relatorio.js"></script>
   <script src="melhorias.js"></script>
   <script src="app.js"></script>
 </body>

@@ -23,6 +23,12 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 7', itens: [
+      '🏠 <b>Tela inicial nova:</b> os avisos, o <b>Hoje</b> e o <b>Total lançado</b>, o cartão <b>🧾 Lançamentos</b> e o cartão <b>🚗 Veículos</b>. Os botões <b>Voz</b>, <b>Foto</b> e <b>Texto</b> abrem direto (um toque só). Tocando no resto do cartão, abre a tela <b>Lançamentos</b>, com os mesmos 3 botões e o histórico completo (os gastos dos veículos continuam juntos). O botão <b>+</b> da tela inicial saiu.',
+      '📊 <b>Relatório do veículo:</b> no <b>+</b> do veículo. <b>Gastos</b> mostra o período (do primeiro ao último gasto, dá para mudar) em lista (abastecimentos, manutenções e despesas, com o total de cada um) ou em gráfico: é só arrastar para o lado. <b>Desempenho</b> mostra os km rodados, o consumo médio, o custo por km, o combustível (preço médio, mais barato e mais caro), etanol x gasolina e a <b>média por tanque(s)</b>: tocando, aparecem os abastecimentos daquele trecho. Quem nunca enche o tanque vê a <b>média aproximada</b>, mês a mês. Num veículo compartilhado, o relatório soma os gastos de todos.',
+      '🔄 <b>Puxar a tela para baixo</b> agora atualiza em segundo plano, sem nenhum desenho na tela. As setas da tela inicial giram enquanto sincroniza.',
+      '🧾 <b>QR Code da nota:</b> o app procura o QR Code em partes da foto, com zoom. Assim lê mais notas e também fotos com mais de um QR Code.'
+    ] },
     { titulo: 'Versão 6', itens: [
       '🚗 <b>Gastos dos veículos na tela inicial:</b> agora eles aparecem junto com os outros lançamentos e entram no <b>Hoje</b> e no <b>Total lançado</b> (a Galeria fica de fora; num veículo compartilhado, só os que você lançou). Tocando no gasto, ele abre direto.',
       '🔄 <b>Puxar a tela para baixo</b> atualiza (sincroniza) sem sair da tela em que você está e sem perder o que estiver digitado.',
@@ -339,7 +345,7 @@
     $('toast').classList.add('oculto'); // o aviso que estava na tela não cobre as opções
     return new Promise((ok) => {
       abrirDialogo(`<div class="fundo-dialogo menu-mais" id="mm-fundo"><div class="folha-mais" role="dialog" aria-label="${esc(rotulo)}">` +
-        opcoes.map((o, i) => `<button class="opcao-mais" type="button"${o.id ? ` id="${esc(o.id)}"` : ''} data-opcao="${i}">` +
+        opcoes.map((o, i) => `<button class="opcao-mais${o.larga ? ' larga' : ''}" type="button"${o.id ? ` id="${esc(o.id)}"` : ''} data-opcao="${i}">` +
           `<span class="icone-mais" aria-hidden="true">${o.icone}</span>${esc(o.texto)}</button>`).join('') +
         '</div><button class="fab fechar" type="button" id="mm-fechar" aria-label="Fechar"><span aria-hidden="true">+</span></button></div>',
       () => ok(null));
@@ -448,7 +454,7 @@
     $('tela-' + nome).classList.remove('oculto');
     telaAtual = nome;
     dadosTela = dados;
-    document.body.classList.toggle('tem-fab', nome === 'inicio' || nome === 'veiculo'); // o aviso (toast) sobe acima do "+"
+    document.body.classList.toggle('tem-fab', nome === 'veiculo'); // o aviso (toast) sobe acima do "+"
     window.scrollTo(0, 0);
     if (empilhar) { const estado = estadoTela(); quandoHistoricoPronto(() => history.pushState(estado, '')); }
   }
@@ -495,10 +501,10 @@
       const destino = history.state;
       if (!(await Veiculos.podeSair())) { quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); return; }
       if (destino && Veiculos.ehTela(destino.tela)) Veiculos.mostrar(destino.tela, destino.dados);
-      else exibirInicio();
+      else irParaBase(destino);
       return;
     }
-    if (await podeSairDaTela()) exibirInicio();
+    if (await podeSairDaTela()) irParaBase(history.state);
     else quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); // depois que a pergunta sair do histórico
   });
   function voltar() {
@@ -512,6 +518,22 @@
     Voz.audio = null;
     Foto.fotos = [];
     voltar();
+  }
+  /** Volta para a tela de baixo (V7): a tela Lançamentos, se veio dela; senão, a tela inicial. */
+  function irParaBase(destino) {
+    if (destino && destino.tela === 'lancamentos') exibirLancamentos(false);
+    else exibirInicio();
+  }
+  /** As telas que mostram os lançamentos (a inicial e a Lançamentos) e que a sincronização redesenha. */
+  function naPrincipal() { return telaAtual === 'inicio' || telaAtual === 'lancamentos'; }
+  async function exibirLancamentos(empilhar = true) {
+    liberarUrls();
+    Form.token = null;
+    Voz.token = null;
+    Foto.token = null;
+    if (removido) return;
+    mostrarTela('lancamentos', { empilhar });
+    renderInicio();
   }
   async function exibirInicio() {
     liberarUrls();
@@ -534,11 +556,13 @@
     novo: 'Crie sua conta ou entre, se você já tem uma.',
     migracao: 'Novidade: agora cada pessoa tem uma conta com nome e senha, para poder usar o app em outro celular. Crie a sua para continuar. Os lançamentos deste celular continuam aqui.',
     sessao: 'Sua sessão terminou. Entre de novo na sua conta.',
-    saiu: 'Você saiu da conta neste celular. Entre com seu nome e senha, ou crie uma conta.'
+    saiu: 'Você saiu da conta neste celular. Entre com seu nome e senha, ou crie uma conta.',
+    excluida: 'Esta conta foi excluída pelo organizador. Para usar o app de novo, fale com ele.'
   };
 
   function motivoEntrada(p) {
     if (!p) return 'novo';
+    if (p.contaExcluida) return 'excluida';
     if (p.sessaoInvalida) return 'sessao';
     if (!p.contaId && (p.nome || p.registrado)) return 'migracao';
     if (p.saiuEm) return 'saiu';
@@ -617,6 +641,7 @@
   async function iniciarBoasVindas(motivo = 'novo') {
     const p = await Perfil.obter();
     $('bv-intro').textContent = INTRO[motivo] || INTRO.novo;
+    $('bv-intro').classList.toggle('alerta-intro', motivo === 'excluida');
     $('bv-nome').value = motivo === 'migracao' ? (p.nomeServidor || p.nome || '') : motivo === 'sessao' ? (p.nome || '') : '';
     $('bv-senha').value = '';
     $('bv-senha2').value = '';
@@ -637,6 +662,7 @@
     if (e instanceof Api.ErroRede) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
     if (e.codigo === 'codigo_invalido') return 'O código do grupo não confere. Digite o código que está no link do app (ou peça ao organizador).';
     if (e.codigo === 'senha_incorreta') return 'Senha incorreta. Se esqueceu, toque em “Esqueci minha senha”.';
+    if (e.codigo === 'cadastro_em_analise' || e.codigo === 'conta_excluida') return e.message; // V7
     if (e.codigo === 'acao_desconhecida') return 'O servidor ainda está na versão antiga. Avise o organizador para atualizar o código no Apps Script.';
     return e.message;
   }
@@ -673,6 +699,12 @@
       const r = await Api.chamar(criar ? 'criarConta' : 'entrar', dados, { perfil: temp, tempoMs: 30000 });
       await concluirEntrada(r, anterior, temp);
     } catch (e) {
+      if (e.codigo === 'cadastro_em_analise') {
+        // V7: quem foi excluído e se cadastrou de novo: o organizador precisa aprovar
+        erro('');
+        escolher(e.message, [{ valor: 'ok', texto: 'Entendi', classe: 'primario' }]);
+        return;
+      }
       erro(mensagemErroConta(e));
       if (e.codigo === 'codigo_invalido') mostrarCampoCodigo('bv-bloco-codigo', 'bv-codigo', true);
     } finally {
@@ -897,21 +929,36 @@
       const atual = await Perfil.obter();
       if (atual && atual.organizador) { atual.organizador = false; await Perfil.salvar(atual); }
     }
-    if (JSON.stringify(pedidosSenha) !== antes && telaAtual === 'inicio') renderInicio();
+    if (JSON.stringify(pedidosSenha) !== antes && naPrincipal()) renderInicio();
   }
 
   // ------------------------------------------------------------------
   //  Tela inicial
   // ------------------------------------------------------------------
-  function cartao(l, anexos) {
-    const fotos = anexos.filter(a => a.tipo === 'foto').length;
-    const temAudio = l.origem === 'voz';
+  function descricaoLanc(l) {
     const nota = l.origem === 'foto';
     let desc = l.descricao || (l.itens && l.itens.length ? l.itens.map(i => i.nome).filter(Boolean).join(', ') : '');
     if (!desc) {
       desc = l.status === 'aguardando_ia' ? (nota ? 'Nota aguardando leitura' : 'Áudio aguardando interpretação')
         : l.status === 'erro_ia' ? (nota ? 'Nota não lida' : 'Áudio não interpretado') : (l.categoria || 'Lançamento');
     }
+    return desc;
+  }
+  /** "hoje, 20:37", "ontem, 18:02" ou "17/11" (com a hora, quando ela é conhecida). */
+  function quandoCurto(ms, comHora) {
+    if (!ms) return '';
+    const k = chaveDia(ms);
+    const ontem = chaveDia(Date.now() - 86400000);
+    if (k === chaveDia(Date.now())) return comHora ? 'hoje, ' + hora(ms) : 'hoje';
+    if (k === ontem) return comHora ? 'ontem, ' + hora(ms) : 'ontem';
+    const d = new Date(ms);
+    return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+  function cartao(l, anexos) {
+    const fotos = anexos.filter(a => a.tipo === 'foto').length;
+    const temAudio = l.origem === 'voz';
+    const nota = l.origem === 'foto';
+    const desc = descricaoLanc(l);
     const meta = [hora(l.dataHora), l.categoria, l.meioPagamento].filter(Boolean).join(' · ');
     const selos = [];
     if (l.status === 'revisar') selos.push('<span class="selo revisar">Revisar</span>');
@@ -945,7 +992,7 @@
     // V6: os gastos dos veículos (os que a pessoa lançou; menos a Galeria) entram na lista e nos totais
     const doVeiculo = await Veiculos.paraInicio();
     const itens = lancs.map(l => ({ quando: l.dataHora || 0, valor: l.valorTotal, l }))
-      .concat(doVeiculo.map(g => ({ quando: g.quando, valor: g.valor, html: g.html })))
+      .concat(doVeiculo.map(g => ({ quando: g.quando, valor: g.valor, html: g.html, resumo: g.resumo, comHora: g.comHora })))
       .sort((a, b) => b.quando - a.quando);
 
     const hoje = chaveDia(Date.now());
@@ -953,9 +1000,15 @@
     const totalHoje = comValor.filter(x => chaveDia(x.quando) === hoje).reduce((s, x) => s + Number(x.valor), 0);
     const total = comValor.reduce((s, x) => s + Number(x.valor), 0);
     $('totais').innerHTML = `<div><small>Hoje</small> <b>${brl(Math.round(totalHoje * 100) / 100)}</b></div><div><small>Total lançado</small> <b>${brl(Math.round(total * 100) / 100)}</b></div>`;
+    // tela inicial (V7): Hoje e Total, o último lançamento e o resumo dos veículos
+    $('ini-numeros').innerHTML = `<div><small>Hoje</small><b>${brl(Math.round(totalHoje * 100) / 100)}</b></div><div><small>Total lançado</small><b>${brl(Math.round(total * 100) / 100)}</b></div>`;
+    const ult = itens[0];
+    $('ini-ultimo').textContent = !ult ? 'Nenhum lançamento ainda. Toque em Voz, Foto ou Texto.'
+      : 'Último: ' + [ult.l ? descricaoLanc(ult.l) : ult.resumo, ult.valor != null ? brl(ult.valor) : '', quandoCurto(ult.quando, ult.l ? true : ult.comHora)].filter(Boolean).join(' · ');
+    Veiculos.resumoInicio().then((r) => { $('ini-veiculos').textContent = r.texto; }).catch(() => { /* fica como estava */ });
 
     if (!itens.length) {
-      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar seu primeiro gasto.</div>';
+      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque em <b>Voz</b>, <b>Foto</b> ou <b>Texto</b> lá em cima para lançar seu primeiro gasto.</div>';
     } else {
       let html = '';
       let diaAtual = '';
@@ -1141,19 +1194,19 @@
     if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 3000); return; }
     Sync.sincronizar({ manual: true });
   };
-  // botão "+": as três formas de lançar e os veículos
-  $('btn-mais').onclick = async () => {
-    const escolha = await menuMais('Lançar', [
-      { valor: 'voz', id: 'btn-voz', icone: '🎤', texto: 'Lançar por voz' },
-      { valor: 'foto', id: 'btn-foto', icone: '📷', texto: 'Lançar por foto' },
-      { valor: 'texto', id: 'btn-texto', icone: '✏️', texto: 'Lançar por texto' },
-      { valor: 'veiculos', id: 'btn-veiculos', icone: '🚗', texto: 'Veículos' }
-    ]);
-    if (escolha === 'voz') abrirVoz();
-    else if (escolha === 'foto') abrirFoto();
-    else if (escolha === 'texto') abrirNovoTexto();
-    else if (escolha === 'veiculos') Veiculos.abrirLista();
-  };
+  // Tela inicial (V7): Voz, Foto e Texto abrem direto; o resto do cartão abre a tela Lançamentos.
+  // Depois de salvar, o "voltar" leva para a tela de onde a pessoa veio.
+  const LANCAR = { voz: () => abrirVoz(), foto: () => abrirFoto(), texto: () => abrirNovoTexto() };
+  ['voz', 'foto', 'texto'].forEach((k) => {
+    $('btn-' + k).addEventListener('click', (e) => { e.stopPropagation(); LANCAR[k](); });
+    $('lc-' + k).addEventListener('click', () => LANCAR[k]());
+  });
+  $('btn-lancamentos').addEventListener('click', () => exibirLancamentos());
+  $('btn-veiculos').addEventListener('click', () => Veiculos.abrirLista());
+  ['btn-lancamentos', 'btn-veiculos'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); $(id).click(); }
+  }));
+  $('lc-voltar').onclick = () => voltar();
 
   // Tocar e segurar a engrenagem ou o "+" mostra o nome do botão por 3 s (V5)
   let dicaRelogio = null;
@@ -1192,7 +1245,6 @@
     botao.addEventListener('click', (e) => { if (segurou) { segurou = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
   }
   dicaAoSegurar($('ini-config'), 'Configurações');
-  dicaAoSegurar($('btn-mais'), 'Adicionar um item');
   dicaAoSegurar($('vx-mais'), 'Adicionar um item');
   dicaAoSegurar($('vx-config'), 'Configurações do veículo');
   $('ini-config').onclick = () => abrirConfig();
@@ -2087,7 +2139,7 @@
     if (d.estado === 'concluido') {
       const r = d.resumo;
       const faltam = await Sync.pendentes();
-      if (d.visivel || !$('sync-rotulo').classList.contains('oculto')) {
+      if ((d.visivel && !d.silencioso) || !$('sync-rotulo').classList.contains('oculto')) {
         if (faltam === 0 && !r.erros.length) rotulo('Sincronizado', 'verde', 2500);
         else rotulo('');
       }
@@ -2099,7 +2151,7 @@
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
       else if (r.erros.length) toast('Alguns itens não foram enviados; vou tentar de novo.', 4000);
       else if (d.manual && telaAtual === 'config') toast('Sincronização concluída.');
-      if (telaAtual === 'inicio') renderInicio();
+      if (naPrincipal()) renderInicio();
       else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
       if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
@@ -2109,21 +2161,27 @@
     }
     if (d.estado === 'falhou' || d.estado === 'erro') {
       rotulo('');
+      if (d.codigo === 'conta_excluida') {
+        // V7: o organizador excluiu a conta. O app sai dela na hora, em qualquer tela.
+        fecharDialogo();
+        iniciarBoasVindas('excluida');
+        return;
+      }
       if (d.codigo === 'sessao_invalida') {
-        if (telaAtual === 'inicio' || telaAtual === 'config') iniciarBoasVindas('sessao');
+        if (naPrincipal() || telaAtual === 'config') iniciarBoasVindas('sessao');
         return; // nas outras telas, a pessoa termina o que está fazendo; o pedido para entrar aparece ao voltar
       }
       const repetido = d.mensagem === ultimoAvisoErro.msg && Date.now() - ultimoAvisoErro.quando < 10 * 60 * 1000;
-      if (d.manual || (d.estado === 'erro' && !repetido)) {
+      if ((d.manual && !d.silencioso) || (d.estado === 'erro' && !repetido)) {
         toast(d.mensagem, 5000);
         ultimoAvisoErro = { msg: d.mensagem, quando: Date.now() };
       }
-      if (telaAtual === 'inicio') renderInicio();
+      if (naPrincipal()) renderInicio();
       else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
       return;
     }
-    if (d.estado === 'offline' && d.manual) toast('Sem internet no momento.');
+    if (d.estado === 'offline' && d.manual && !d.silencioso) toast('Sem internet no momento.');
     atualizarIconeSync();
   });
 
@@ -2147,75 +2205,46 @@
   }, 60000);
 
   // ------------------------------------------------------------------
-  //  Puxar a tela para baixo atualiza (V6): sincroniza e redesenha a tela
-  //  em que a pessoa está, sem recarregar o app e sem perder o que estiver
-  //  digitado. Nos dados móveis vale como tocar nas setas.
+  //  Puxar a tela para baixo atualiza (V7: em segundo plano, sem nenhum
+  //  desenho na tela e sem vibrar). Sincroniza sem sair da tela e sem
+  //  perder o que estiver digitado; só as setas da tela inicial giram.
+  //  Nos dados móveis vale como tocar nas setas.
   // ------------------------------------------------------------------
   const PUXAR_LIMITE = 64;
   const SEM_PUXAR = new Set(['boas-vindas', 'senha', 'removido', 'whatsapp']);
-  const puxar = { y0: null, d: 0, el: null };
+  const puxar = { y0: null, x0: 0, d: 0 };
   function prepararPuxar() {
-    const el = document.createElement('div');
-    el.id = 'puxar-atualizar';
-    el.className = 'puxar';
-    el.setAttribute('aria-hidden', 'true');
-    el.innerHTML = $('btn-sync').querySelector('svg').outerHTML;
-    document.body.appendChild(el);
-    puxar.el = el;
     const podeComecar = (e) => e.touches.length === 1 && !dialogoAberto && !removido && window.scrollY <= 0 &&
       !SEM_PUXAR.has(telaAtual) && !Visor.aberto() && !Camera.aberta() && !Recorte.aberto() &&
-      !el.classList.contains('girando') && !(e.target.closest && e.target.closest('textarea, select, .fundo-dialogo'));
+      !(e.target.closest && e.target.closest('textarea, select, .fundo-dialogo'));
     document.addEventListener('touchstart', (e) => {
       puxar.y0 = podeComecar(e) ? e.touches[0].clientY : null;
+      puxar.x0 = e.touches.length ? e.touches[0].clientX : 0;
       puxar.d = 0;
     }, { passive: true });
     document.addEventListener('touchmove', (e) => {
       if (puxar.y0 == null) return;
       const dy = e.touches[0].clientY - puxar.y0;
-      if (dy <= 0 || window.scrollY > 0) { if (puxar.d) esconderPuxar(); puxar.d = 0; return; }
+      const dx = Math.abs(e.touches[0].clientX - puxar.x0);
+      if (dy <= 0 || window.scrollY > 0 || dx > dy) { puxar.d = 0; puxar.y0 = null; return; } // rolou ou arrastou para o lado
       puxar.d = Math.min(dy * 0.5, 110);
-      el.classList.add('arrastando');
-      el.classList.toggle('pronto', puxar.d >= PUXAR_LIMITE);
-      el.style.opacity = String(Math.min(1, puxar.d / 40));
-      el.style.transform = `translateY(${puxar.d - 44}px) rotate(${-puxar.d * 3}deg)`;
     }, { passive: true });
     const soltar = () => {
       if (puxar.y0 == null) return;
       puxar.y0 = null;
-      el.classList.remove('arrastando');
       if (puxar.d >= PUXAR_LIMITE) atualizarPuxando();
-      else esconderPuxar();
       puxar.d = 0;
     };
     document.addEventListener('touchend', soltar, { passive: true });
-    document.addEventListener('touchcancel', soltar, { passive: true });
-  }
-  function esconderPuxar() {
-    const el = puxar.el;
-    el.classList.remove('arrastando', 'pronto', 'girando');
-    el.style.opacity = '0';
-    el.style.transform = '';
+    document.addEventListener('touchcancel', () => { puxar.y0 = null; puxar.d = 0; }, { passive: true });
   }
   async function atualizarPuxando() {
-    const el = puxar.el;
-    el.classList.add('girando');
-    el.classList.remove('pronto');
-    el.style.opacity = '1';
-    el.style.transform = 'translateY(22px)';
-    const inicio = Date.now();
+    if (Sync.estaRodando()) return; // já está sincronizando: as setas da tela inicial já estão girando
     try {
-      let r = await Sync.sincronizar({ manual: true });
-      // já estava sincronizando: espera terminar (no máximo 3 minutos)
-      while (r && r.ignorado === 'rodando' && Sync.estaRodando() && Date.now() - inicio < 180000) {
-        await new Promise(ok => setTimeout(ok, 400));
-        if (!Sync.estaRodando()) r = null;
-      }
-      // a sincronização redesenha a tela inicial e as listas dos veículos; nas outras telas nada é apagado
-      if (telaAtual === 'inicio' && r && r.ignorado) renderInicio();
-    } catch (e) { /* o aviso da sincronização já aparece */ }
-    const falta = 600 - (Date.now() - inicio);
-    if (falta > 0) await new Promise(ok => setTimeout(ok, falta));
-    esconderPuxar();
+      const r = await Sync.sincronizar({ manual: true, silencioso: true });
+      // a sincronização redesenha a tela inicial, a Lançamentos e as telas dos veículos; nas outras nada é apagado
+      if (naPrincipal() && r && r.ignorado) renderInicio();
+    } catch (e) { /* tenta de novo na próxima vez */ }
   }
   prepararPuxar();
 
@@ -2225,12 +2254,12 @@
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     promptInstalacao = e;
-    if (telaAtual === 'inicio') renderInicio();
+    if (naPrincipal()) renderInicio();
   });
   window.addEventListener('appinstalled', () => {
     promptInstalacao = null;
     toast('App instalado na tela inicial!');
-    if (telaAtual === 'inicio') renderInicio();
+    if (naPrincipal()) renderInicio();
   });
 
   if ('serviceWorker' in navigator) {
@@ -2240,7 +2269,7 @@
     window.addEventListener('load', async () => {
       try {
         const reg = await navigator.serviceWorker.register('sw.js');
-        const avisarNovaVersao = (w) => { swEsperando = w; if (telaAtual === 'inicio') renderInicio(); };
+        const avisarNovaVersao = (w) => { swEsperando = w; if (naPrincipal()) renderInicio(); };
         if (reg.waiting && navigator.serviceWorker.controller) avisarNovaVersao(reg.waiting);
         reg.addEventListener('updatefound', () => {
           const novo = reg.installing;

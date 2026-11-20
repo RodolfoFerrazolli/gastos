@@ -14,7 +14,7 @@ const Melhorias = (() => {
   // Números fixos das telas: uma tela nova ganha o próximo número livre; número de tela que sair não volta a ser usado.
   const CATALOGO = {
     1: 'Tela inicial',
-    2: 'Menu do "+" da tela inicial',
+    2: 'Menu do "+" da tela inicial (saiu na V7)',
     3: 'Lançar por voz',
     4: 'Lançar por foto (nota fiscal)',
     5: 'Lançamento (por texto, editar ou revisar)',
@@ -52,13 +52,19 @@ const Melhorias = (() => {
     37: 'Engrenagem do veículo',
     38: 'Informações do veículo',
     39: 'Calendário (datas dos veículos)',
-    40: 'Pedido de correção ou melhoria'
+    40: 'Pedido de correção ou melhoria',
+    41: 'Lançamentos (histórico)',
+    42: 'Relatório do veículo',
+    43: 'Relatório: Gastos (lista)',
+    44: 'Relatório: Gastos (gráfico)',
+    45: 'Relatório: Desempenho'
   };
   const LISTA = { manutencao: 20, seguro: 23, ipva: 26, licenciamento: 28, multa: 30, outros: 32, galeria: 34 };
   const ITEM = { abastecimento: 19, manutencao: 21, seguro: 24, ipva: 27, licenciamento: 29, multa: 31, outros: 33, galeria: 35 };
   const TELAS_SIMPLES = {
     inicio: 1, voz: 3, foto: 4, form: 5, config: 9, 'boas-vindas': 11, senha: 12, whatsapp: 13, removido: 14,
-    veiculos: 15, 'veiculo-form': 16, veiculo: 17, 'v-compartilhar': 36
+    veiculos: 15, 'veiculo-form': 16, veiculo: 17, 'v-compartilhar': 36,
+    lancamentos: 41, 'v-relatorio': 42, 'v-desempenho': 45
   };
   // telas em que o ícone não aparece (ainda sem conta)
   const SEM_ICONE = new Set(['boas-vindas', 'senha', 'removido']);
@@ -77,6 +83,7 @@ const Melhorias = (() => {
       if (tela === 'v-registro') num = ITEM[tipo] || 0;
       else if (tela === 'v-lista') num = LISTA[tipo] || 0;
       else if (tela === 'v-menu') num = tipo === 'impostos' ? 25 : 22;
+      else if (tela === 'v-gastos') num = typeof Relatorio !== 'undefined' && Relatorio.abaAtual() === 'grafico' ? 44 : 43;
       else num = TELAS_SIMPLES[tela] || 0;
     }
     return { num, nome: CATALOGO[num] || App().telaAtual() || 'tela' };

@@ -159,7 +159,7 @@ const Recorte = (() => {
         let qr = null;
         if (estado && estado.qr) {
           $('recorte-usar').textContent = 'Procurando o QR Code…';
-          qr = await Promise.race([estado.qr, new Promise(ok => setTimeout(() => ok(null), 8000))]);
+          qr = await Promise.race([estado.qr, new Promise(ok => setTimeout(() => ok(null), 18000))]); // V7: a busca em pedaços pode levar mais tempo
         }
         fechar({ acao: 'usar', blob, qr });
       } catch (e) {
