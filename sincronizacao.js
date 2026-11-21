@@ -79,7 +79,9 @@ const Sync = (() => {
     });
     // pedidos de correção ou melhoria esperando o envio (V6)
     ((await Banco.lerConfig('melhoriasPendentes', [])) || []).forEach(m => ids.add('melhoria:' + m.id));
-    return ids.size;
+    // alterações nos grupos esperando o envio (V9)
+    const nGrupos = typeof Grupos !== 'undefined' ? await Grupos.pendentes() : 0;
+    return ids.size + nGrupos;
   }
 
   function paraServidor(l) {
@@ -770,6 +772,13 @@ const Sync = (() => {
           await Banco.gravarConfig('melhoriasPendentes', resto);
           resumo.melhorias = (resumo.melhorias || 0) + 1;
         }
+      }
+
+      // G) grupos (V9): manda o que mudou e traz os grupos de que a conta participa (servidor antigo: fica guardado aqui)
+      if (typeof Grupos !== 'undefined') {
+        if (!somenteBaixar && (await Grupos.pendentes()) > 0) avisar('sincronizando', { manual, visivel, detalhe: 'Enviando os grupos…' });
+        const rg = await item(() => Grupos.sincronizar({ enviar: !somenteBaixar }), resumo, 'grupos');
+        if (rg && rg.recusados) resumo.gruposRecusados = rg.recusados;
       }
 
       // 6) novidades do servidor (histórico da conta, outros celulares, IA, administrador, endereços, listas)

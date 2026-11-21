@@ -2,12 +2,13 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v8';
+const VERSAO = 'gastos-v9';
 const ARQUIVOS = [
   './',
   './index.html',
   './estilo.css',
   './config.js',
+  './trava.js',
   './banco.js',
   './api.js',
   './gravador.js',
@@ -20,6 +21,7 @@ const ARQUIVOS = [
   './recorte.js',
   './sincronizacao.js',
   './veiculos.js',
+  './grupos.js',
   './relatorio.js',
   './exportar.js',
   './melhorias.js',

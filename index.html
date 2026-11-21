@@ -139,6 +139,10 @@
     <div class="bloco-ini" id="btn-veiculos" role="button" tabindex="0">
       <div class="bloco-topo"><div><div class="bloco-titulo">🚗 Veículos</div><div class="bloco-sub" id="ini-veiculos"></div></div><span class="seta" aria-hidden="true">›</span></div>
     </div>
+    <!-- V9: grupos (despesas divididas) -->
+    <div class="bloco-ini" id="btn-grupos" role="button" tabindex="0">
+      <div class="bloco-topo"><div><div class="bloco-titulo">👥 Grupos</div><div class="bloco-sub" id="ini-grupos"></div></div><span class="seta" aria-hidden="true">›</span></div>
+    </div>
     <div class="espaco-fim"></div>
   </section>
 
@@ -154,6 +158,7 @@
       <button type="button" id="lc-foto" aria-label="Lançar por foto">📷<span>Foto</span></button>
       <button type="button" id="lc-texto" aria-label="Lançar por texto">✏️<span>Texto</span></button>
     </div>
+    <div id="lc-grupos" class="lc-grupos"></div>
     <div class="totais" id="totais"></div>
     <div id="lista"></div>
   </section>
@@ -305,6 +310,65 @@
         <button class="botao perigo" id="cfg-remover">Remover app</button>
       </div>
     </div>
+  </section>
+
+  <!-- ============ GRUPOS (V9): despesas divididas ============ -->
+  <section id="tela-grupos" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="gr-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Grupos</div><div class="topo-sub">Despesas divididas</div></div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <div id="gr-lista" class="lista-grupos"></div>
+      <button class="botao primario grande" id="gr-criar" type="button">+ Criar grupo</button>
+    </div>
+  </section>
+
+  <!-- ============ GRUPO: resumo e as abas Despesas, Saldos, Acertar e Pessoas ============ -->
+  <section id="tela-grupo" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="gx-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="gx-titulo"></div><div class="topo-sub" id="gx-sub"></div></div>
+      <div class="topo-acoes">
+        <button class="botao-icone" id="gx-config" type="button" aria-label="Opções do grupo" title="Opções do grupo">⚙️</button>
+      </div>
+    </header>
+    <div class="conteudo g-conteudo">
+      <div id="gx-resumo"></div>
+      <div class="g-abas" id="gx-abas" role="tablist"></div>
+      <div id="gx-corpo"></div>
+    </div>
+  </section>
+
+  <!-- ============ GRUPO: despesa (nova ou editar) ============ -->
+  <section id="tela-grupo-despesa" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="gd-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="gd-titulo">Despesa do grupo</div><div class="topo-sub" id="gd-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo g-conteudo" id="gd-conteudo"></div>
+  </section>
+
+  <!-- ============ GRUPO: pessoa (adicionar ou editar) ============ -->
+  <section id="tela-grupo-pessoa" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="gp-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="gp-titulo">Adicionar pessoa</div><div class="topo-sub" id="gp-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo g-conteudo" id="gp-conteudo"></div>
+  </section>
+
+  <!-- ============ GRUPO: relatório (só para ver no app) ============ -->
+  <section id="tela-grupo-relatorio" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="gl-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Relatório do grupo</div><div class="topo-sub" id="gl-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo g-conteudo" id="gl-conteudo"></div>
   </section>
 
   <!-- ============ VEÍCULOS (V4): lista dos veículos da conta ============ -->
@@ -541,6 +605,7 @@
   <div id="dialogo"></div>
 
   <script src="config.js"></script>
+  <script src="trava.js"></script>
   <script src="banco.js"></script>
   <script src="api.js"></script>
   <script src="gravador.js"></script>
@@ -551,6 +616,7 @@
   <script src="visor.js"></script>
   <script src="sincronizacao.js"></script>
   <script src="veiculos.js"></script>
+  <script src="grupos.js"></script>
   <script src="relatorio.js"></script>
   <script src="exportar.js"></script>
   <script src="melhorias.js"></script>

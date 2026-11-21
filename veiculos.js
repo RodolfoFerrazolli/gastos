@@ -2096,6 +2096,8 @@ const Veiculos = (() => {
     // usados pelo relatório (relatorio.js, V7)
     _util: {
       veiculoAtivo, gastosDo, abrirCalendario, definirData,
+      // V9 (grupos): valor digitado como numa calculadora
+      caixaRegistradora, daMascara, paraMascara,
       // V8 (planilha): o veículo é compartilhado (soma os gastos de todos)?
       compartilhado: async (v, regs) => !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false)
     },

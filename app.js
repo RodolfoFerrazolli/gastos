@@ -23,6 +23,13 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 9', itens: [
+      '👥 <b>Grupos:</b> para dividir as despesas de uma viagem ou de um grupo. Crie o grupo, coloque as pessoas (quem tem o app entra pelo e-mail do cadastro e também vê e lança) e lance as despesas dizendo <b>quem pagou</b>.',
+      '➗ <b>Como dividir:</b> <b>Igual</b> (é só desmarcar quem não participou) ou <b>Valor individual</b> (toque no valor de cada um para escolher <b>inteira</b>, <b>meia</b> ou digitar outro valor; o app acerta os outros para a soma fechar). <b>Criança até 6 anos</b> já vem desmarcada.',
+      '🤝 <b>Saldos e Acertar:</b> quanto cada um pagou, a parte de cada um e quem deve ou recebe, com o menor número de pagamentos para acertar tudo. Quando alguém pagar, toque em <b>Marcar como pago</b>. O <b>relatório do grupo</b> mostra tudo junto.',
+      '🧾 <b>Nos seus lançamentos</b> entra só o que saiu do seu bolso: a despesa que <b>você</b> pagou, pelo <b>valor cheio</b> (para bater com a fatura ou o extrato), com a sua parte e o que tem a receber, e o pagamento do acerto que você fizer.',
+      '🖐️ Com uma janela aberta (filtros, avisos, foto…), a tela de trás não se mexe mais ao arrastar o dedo.'
+    ] },
     { titulo: 'Versão 8', itens: [
       '📥 <b>Exportar planilha do veículo:</b> no <b>Relatório</b> do veículo, o botão <b>Exportar planilha</b> monta uma planilha caprichada com 5 abas: <b>Resumo</b> (totais e gráfico de para onde foi o dinheiro), <b>Gastos</b>, <b>Abastecimentos</b>, <b>Desempenho</b> (média por tanque, etanol x gasolina e gráfico do consumo) e <b>Mês a mês</b>. Você escolhe o período e o formato: <b>Excel</b>, <b>LibreOffice</b>, <b>Google Planilhas</b> (um link que vale por 30 dias) ou <b>PDF</b>. Num veículo compartilhado, todos podem exportar.',
       '📤 <b>Mandar a planilha:</b> pelo celular (WhatsApp, Bluetooth, Drive…) ou por <b>e-mail</b>. O e-mail do seu cadastro já vem preenchido, mas dá para trocar (ou colocar mais de um) sem mudar o cadastro.',
@@ -524,6 +531,14 @@
       else irParaBase(destino);
       return;
     }
+    if (Grupos.ehTela(telaAtual)) {
+      // telas dos grupos (V9): igual às dos veículos
+      const destino = history.state;
+      if (!(await Grupos.podeSair())) { quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); return; }
+      if (destino && Grupos.ehTela(destino.tela)) Grupos.mostrar(destino.tela, destino.dados);
+      else irParaBase(destino);
+      return;
+    }
     if (await podeSairDaTela()) irParaBase(history.state);
     else quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); // depois que a pergunta sair do histórico
   });
@@ -738,7 +753,7 @@
     await Banco.limpar('arquivos');
     await Banco.limpar('veiculos');
     await Banco.limpar('registros');
-    for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite']) await Banco.apagar('config', k);
+    for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite', 'grupos']) await Banco.apagar('config', k);
   }
 
   async function concluirEntrada(r, anterior, temp) {
@@ -1011,8 +1026,10 @@
 
     // V6: os gastos dos veículos (os que a pessoa lançou; menos a Galeria) entram na lista e nos totais
     const doVeiculo = await Veiculos.paraInicio();
+    // V9: dos grupos, só o que saiu do bolso da pessoa (a despesa que ela pagou, pelo valor cheio, e o acerto que ela pagou)
+    const doGrupo = await Grupos.paraInicio();
     const itens = lancs.map(l => ({ quando: l.dataHora || 0, valor: l.valorTotal, l }))
-      .concat(doVeiculo.map(g => ({ quando: g.quando, valor: g.valor, html: g.html, resumo: g.resumo, comHora: g.comHora })))
+      .concat(doVeiculo.concat(doGrupo).map(g => ({ quando: g.quando, valor: g.valor, html: g.html, resumo: g.resumo, comHora: g.comHora })))
       .sort((a, b) => b.quando - a.quando);
 
     const hoje = chaveDia(Date.now());
@@ -1026,6 +1043,8 @@
     $('ini-ultimo').textContent = !ult ? 'Nenhum lançamento ainda. Toque em Voz, Foto ou Texto.'
       : 'Último: ' + [ult.l ? descricaoLanc(ult.l) : ult.resumo, ult.valor != null ? brl(ult.valor) : '', quandoCurto(ult.quando, ult.l ? true : ult.comHora)].filter(Boolean).join(' · ');
     Veiculos.resumoInicio().then((r) => { $('ini-veiculos').textContent = r.texto; }).catch(() => { /* fica como estava */ });
+    Grupos.resumoInicio().then((h) => { $('ini-grupos').innerHTML = h; }).catch(() => { /* fica como estava */ });
+    Grupos.cartaoLancamentos().then((h) => { $('lc-grupos').innerHTML = h; }).catch(() => { /* fica como estava */ });
 
     if (!itens.length) {
       $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque em <b>Voz</b>, <b>Foto</b> ou <b>Texto</b> lá em cima para lançar seu primeiro gasto.</div>';
@@ -1149,6 +1168,8 @@
     if (aviso) { Veiculos.explicarAviso(aviso.dataset.aviso, aviso.dataset.id); return; } // ⚠️ de um gasto do veículo
     const g = e.target.closest('[data-registro]');
     if (g) { Veiculos.abrirRegistro(g.dataset.registro); return; } // gasto do veículo: abre direto (V6)
+    const gd = e.target.closest('[data-gdesp],[data-gpag]');
+    if (gd) { Grupos.abrirDoLancamento(gd); return; } // despesa ou acerto de um grupo (V9)
     const c = e.target.closest('.cartao');
     if (c) abrirLancamento(c.dataset.id);
   });
@@ -1223,7 +1244,9 @@
   });
   $('btn-lancamentos').addEventListener('click', () => exibirLancamentos());
   $('btn-veiculos').addEventListener('click', () => Veiculos.abrirLista());
-  ['btn-lancamentos', 'btn-veiculos'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+  $('btn-grupos').addEventListener('click', () => Grupos.abrirLista());
+  $('lc-grupos').addEventListener('click', (e) => { if (e.target.closest('[data-acao="abrir-grupos"]')) Grupos.abrirSaldos(); });
+  ['btn-lancamentos', 'btn-veiculos', 'btn-grupos'].forEach((id) => $(id).addEventListener('keydown', (e) => {
     if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); $(id).click(); }
   }));
   $('lc-voltar').onclick = () => voltar();
@@ -2170,12 +2193,14 @@
       else if (r.veiculosLidos) toast(r.veiculosLidos === 1 ? 'Um abastecimento foi lido. Abra para revisar.' : `${r.veiculosLidos} abastecimentos foram lidos. Abra para revisar.`, 4500);
       else if (r.limite) toast('Limite gratuito da IA atingido. Os áudios e as notas serão lidos mais tarde.', 4500);
       else if (r.iaIndisponivel) toast('IA indisponível agora: ' + r.iaIndisponivel, 4500);
+      else if (r.gruposRecusados) toast('Algumas alterações nos grupos não foram aceitas (o grupo mudou em outro celular ou você não participa mais dele).', 5000);
       else if (r.erros.length) toast('Alguns itens não foram enviados; vou tentar de novo.', 4000);
       else if (d.manual && telaAtual === 'config') toast('Sincronização concluída.');
       if (naPrincipal()) renderInicio();
       else atualizarIconeSync();
       if (telaAtual === 'config') renderInfo();
       if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
+      if (Grupos.ehTela(telaAtual)) Grupos.aoSincronizar();
       buscarPedidos();
       talvezPedirEmail(); // logo depois da atualização para a V5, o servidor avisa aqui que a conta está sem e-mail
       return;
@@ -2330,6 +2355,11 @@
     telaAtual: () => telaAtual,
     dadosTela: () => dadosTela
   };
+
+  // V9: com uma janela aberta (diálogo, menu, foto, câmera ou recorte), a tela de trás não rola
+  TravaFundo.vigiar(() => !!$('dialogo').firstElementChild ||
+    ['visor', 'camera', 'recorte'].some((id) => { const el = $(id); return !!el && !el.classList.contains('oculto'); }),
+  [$('dialogo'), $('visor'), $('camera'), $('recorte')]);
 
   async function iniciar() {
     try {
