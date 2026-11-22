@@ -973,7 +973,7 @@ const Grupos = (() => {
   async function abrirLista() { await ir('grupos', {}); }
   async function abrirDoLancamento(el) {
     const grupoId = el.dataset.grupo;
-    if (el.dataset.gdesp) { ir('grupo-despesa', { grupoId, despesaId: el.dataset.gdesp }); return; }
+    if (el.dataset.gdesp) { App().abrirVer({ tipo: 'gdesp', id: el.dataset.gdesp, grupoId }); return; } // V10: ver antes de editar
     abas[grupoId] = 'acertar';
     ir('grupo', { grupoId });
   }
@@ -982,6 +982,37 @@ const Grupos = (() => {
     const com = S.lista.filter(G => G.eu && calcular(G).por[G.eu.id].saldo !== 0);
     if (com.length === 1) { abas[com[0].g.id] = 'acertar'; ir('grupo', { grupoId: com[0].g.id }); return; }
     ir('grupos', {});
+  }
+
+  // ------------------------------------------------------------------
+  //  V10: ver a despesa do grupo antes de editar (o lápis ✏️ abre o formulário)
+  // ------------------------------------------------------------------
+  async function htmlVer(id) {
+    const G = (await grupos()).find(x => x.despesas.some(d => d.id === id));
+    if (!G) return null;
+    const d = G.despesas.find(x => x.id === id);
+    const L = App().linhaVer;
+    const partes = d.dados.partes || [];
+    const porPessoa = {};
+    partes.forEach((x) => { porPessoa[x.p] = x; });
+    const linhas = G.pessoas.map((p) => {
+      const x = porPessoa[p.id];
+      const marca = x && x.t === 'meia' ? ' <span class="g-tag t-meia">meia</span>' : x && x.t === 'fixo' && d.dados.modo === 'individual' ? ' <span class="g-tag t-nome">outro</span>' : '';
+      const crianca = p.dados.crianca ? ' <span class="g-tag t-nome">criança</span>' : '';
+      return `<div class="ver-pes${x ? '' : ' fora'}">${avatar(G, p)}<span class="n">${esc(nomeDe(G, p.id))}${marca}${x ? '' : crianca}</span>` +
+        `<span class="v">${x ? brl(x.v) : 'não participou'}</span></div>`;
+    }).join('');
+    const soma = partes.reduce((s2, x) => s2 + v2c(x.v), 0);
+    const fecha = soma === v2c(d.dados.valor);
+    const corpo = '<div class="g-conteudo ver-grupo">' +
+      `<div class="ver-cab"><div><div class="t">${icone(d)} ${esc(d.dados.descricao || 'Despesa')}</div>` +
+      `<div class="s">Pago por ${esc(nomeDe(G, d.dados.pagoPor))} · ${esc(dataCurta(d.dados.data))}</div></div><div class="v">${brl(d.dados.valor)}</div></div>` +
+      '<div class="ver-caixa">' + L('Categoria', d.dados.categoria) + L('Forma de pagamento', d.dados.formaPagamento) +
+      L('Como foi dividido', d.dados.modo === 'individual' ? 'Valor individual' : 'Igual') + L('Lançada por', primeiroNome(d.dados.lancadoPor) || '') + '</div>' +
+      `<div class="ver-secao">Quem participou</div><div class="ver-caixa">${linhas}</div>` +
+      `<div class="ver-caixa ver-soma"><div class="ver-item total"><div><b>Soma</b></div><b>${brl(c2v(soma))}${fecha ? ' ✓' : ''}</b></div></div>` +
+      App().rodapeVer(true) + '</div>';
+    return { titulo: 'Despesa do grupo', sub: G.g.dados.nome, corpo, podeEditar: true, editar: () => ir('grupo-despesa', { grupoId: G.g.id, despesaId: id }) };
   }
 
   // ------------------------------------------------------------------
@@ -1007,7 +1038,7 @@ const Grupos = (() => {
       const el = e.target.closest('[data-acao],[data-despesa],[data-pessoa],[data-pagamento]');
       if (!el) return;
       const grupoId = dadosAtuais().grupoId;
-      if (el.dataset.despesa) { ir('grupo-despesa', { grupoId, despesaId: el.dataset.despesa }); return; }
+      if (el.dataset.despesa) { App().abrirVer({ tipo: 'gdesp', id: el.dataset.despesa, grupoId }); return; } // V10
       if (el.dataset.pessoa) { ir('grupo-pessoa', { grupoId, pessoaId: el.dataset.pessoa }); return; }
       if (el.dataset.pagamento) { desfazerPagamento(el.dataset.pagamento); return; }
       const acao = el.dataset.acao;
@@ -1042,7 +1073,7 @@ const Grupos = (() => {
 
   return {
     ehTela, mostrar, podeSair, aoSincronizar, ir, abrirLista, abrirDoLancamento, abrirSaldos, abaAtual,
-    paraInicio, resumoInicio, cartaoLancamentos, sincronizar, pendentes,
+    paraInicio, resumoInicio, cartaoLancamentos, sincronizar, pendentes, htmlVer,
     // usados nos testes
     _dividir: dividir, _calcular: calcular, _transferencias: transferencias
   };

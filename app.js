@@ -23,6 +23,14 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 10', itens: [
+      '🧾 <b>Tela inicial:</b> o cartão Lançamentos mostra <b>quanto você gastou neste mês</b> e o último lançamento. Para lançar, entre em <b>Lançamentos</b> e toque no <b>+</b> (Lançar por voz, por foto ou por texto).',
+      '👀 <b>Ver antes de editar:</b> tocar num lançamento, num gasto do veículo ou numa despesa do grupo agora só <b>mostra</b> tudo. Para mudar, toque no lápis ✏️ lá em cima.',
+      '📍 <b>Abrir no mapa:</b> o endereço do lançamento abre no app de mapas que você escolher.',
+      '⚖️ <b>Itens por peso:</b> o que é vendido por quilo aparece assim: <b>0,194 kg × R$ 35,99 o kg</b>.',
+      '🚗 <b>Fotos do veículo:</b> no cadastro do veículo, logo abaixo da Observação, dá para tirar fotos ou escolher da galeria. Elas aparecem no ℹ️ do veículo (também para quem tem o veículo compartilhado).',
+      '🐞 <b>Problema ou ideia:</b> além da imagem da tela (que agora dá para tirar no ×), você pode <b>tirar fotos</b> ou escolher da <b>galeria</b> (até 5). E quando o organizador resolver ou não aceitar o seu pedido, o app te avisa.'
+    ] },
     { titulo: 'Versão 9', itens: [
       '👥 <b>Grupos:</b> para dividir as despesas de uma viagem ou de um grupo. Crie o grupo, coloque as pessoas (quem tem o app entra pelo e-mail do cadastro e também vê e lança) e lance as despesas dizendo <b>quem pagou</b>.',
       '➗ <b>Como dividir:</b> <b>Igual</b> (é só desmarcar quem não participou) ou <b>Valor individual</b> (toque no valor de cada um para escolher <b>inteira</b>, <b>meia</b> ou digitar outro valor; o app acerta os outros para a soma fechar). <b>Criança até 6 anos</b> já vem desmarcada.',
@@ -317,7 +325,7 @@
       if (!popsPendentes) { const fila = aoTerminarPops; aoTerminarPops = []; fila.forEach(f => f()); }
       return true;
     }
-    if (!dialogoAberto) return false;
+    if (!dialogoAberto || camada) return false; // V10: câmera ou foto aberta por cima do diálogo: o "voltar" é dela
     const d = dialogoAberto;
     dialogoAberto = null;
     $('dialogo').innerHTML = '';
@@ -490,7 +498,7 @@
     $('tela-' + nome).classList.remove('oculto');
     telaAtual = nome;
     dadosTela = dados;
-    document.body.classList.toggle('tem-fab', nome === 'veiculo'); // o aviso (toast) sobe acima do "+"
+    document.body.classList.toggle('tem-fab', nome === 'veiculo' || nome === 'lancamentos'); // o aviso (toast) sobe acima do "+"
     window.scrollTo(0, 0);
     if (empilhar) { const estado = estadoTela(); quandoHistoricoPronto(() => history.pushState(estado, '')); }
   }
@@ -523,6 +531,7 @@
     if (tinhaCamada) return; // entrada que sobrou (ex.: a câmera fechou e o recorte não abriu): só some
     if (telaAtual === 'senha') { mostrarTela('boas-vindas', { empilhar: false }); return; }
     if (['inicio', 'boas-vindas', 'whatsapp', 'removido'].includes(telaAtual)) return;
+    if (telaAtual === 'ver') { irParaBase(history.state); return; } // V10: tela de ver (só olhar)
     if (Veiculos.ehTela(telaAtual)) {
       // telas dos veículos: uma dentro da outra; o "voltar" vai para a tela anterior (guardada no histórico)
       const destino = history.state;
@@ -556,6 +565,9 @@
   }
   /** Volta para a tela de baixo (V7): a tela Lançamentos, se veio dela; senão, a tela inicial. */
   function irParaBase(destino) {
+    if (destino && destino.tela === 'ver' && destino.dados) { abrirVer(destino.dados, false); return; } // V10
+    if (destino && Veiculos.ehTela(destino.tela)) { Veiculos.mostrar(destino.tela, destino.dados); return; }
+    if (destino && Grupos.ehTela(destino.tela)) { Grupos.mostrar(destino.tela, destino.dados); return; }
     if (destino && destino.tela === 'lancamentos') exibirLancamentos(false);
     else exibirInicio();
   }
@@ -1040,14 +1052,20 @@
     // tela inicial (V7): Hoje e Total, o último lançamento e o resumo dos veículos
     $('ini-numeros').innerHTML = `<div><small>Hoje</small><b>${brl(Math.round(totalHoje * 100) / 100)}</b></div><div><small>Total lançado</small><b>${brl(Math.round(total * 100) / 100)}</b></div>`;
     const ult = itens[0];
-    $('ini-ultimo').textContent = !ult ? 'Nenhum lançamento ainda. Toque em Voz, Foto ou Texto.'
-      : 'Último: ' + [ult.l ? descricaoLanc(ult.l) : ult.resumo, ult.valor != null ? brl(ult.valor) : '', quandoCurto(ult.quando, ult.l ? true : ult.comHora)].filter(Boolean).join(' · ');
+    // V10: o que entrou no extrato neste mês (lançamentos, gastos dos veículos e o que a pessoa pagou nos grupos)
+    const agoraD = new Date();
+    const doMes = itens.filter((x) => { const d = new Date(x.quando); return d.getMonth() === agoraD.getMonth() && d.getFullYear() === agoraD.getFullYear(); });
+    const somaMes = doMes.filter(x => x.valor != null).reduce((s2, x) => s2 + Number(x.valor), 0);
+    $('ini-ultimo').classList.add('ini-resumo');
+    $('ini-ultimo').innerHTML = !ult ? 'Nenhum lançamento ainda. Toque aqui e depois no <b>+</b> para lançar.'
+      : `<div>Este mês: <b>${brl(Math.round(somaMes * 100) / 100)}</b> · ${plural(doMes.length, '1 lançamento', '# lançamentos')}</div>` +
+        '<div>Último: ' + esc([ult.l ? descricaoLanc(ult.l) : ult.resumo, ult.valor != null ? brl(ult.valor) : '', quandoCurto(ult.quando, ult.l ? true : ult.comHora)].filter(Boolean).join(' · ')) + '</div>';
     Veiculos.resumoInicio().then((r) => { $('ini-veiculos').textContent = r.texto; }).catch(() => { /* fica como estava */ });
     Grupos.resumoInicio().then((h) => { $('ini-grupos').innerHTML = h; }).catch(() => { /* fica como estava */ });
     Grupos.cartaoLancamentos().then((h) => { $('lc-grupos').innerHTML = h; }).catch(() => { /* fica como estava */ });
 
     if (!itens.length) {
-      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque em <b>Voz</b>, <b>Foto</b> ou <b>Texto</b> lá em cima para lançar seu primeiro gasto.</div>';
+      $('lista').innerHTML = '<div class="vazio">Nenhum lançamento ainda.<br>Toque no <b>+</b> lá embaixo para lançar seu primeiro gasto (por voz, foto ou texto).</div>';
     } else {
       let html = '';
       let diaAtual = '';
@@ -1235,12 +1253,17 @@
     if (Sync.estaRodando()) { rotulo('Sincronizando…', 'amarelo', 3000); return; }
     Sync.sincronizar({ manual: true });
   };
-  // Tela inicial (V7): Voz, Foto e Texto abrem direto; o resto do cartão abre a tela Lançamentos.
+  // V10: o cartão da tela inicial abre a tela Lançamentos; lá, o "+" mostra Lançar por voz, por foto e por texto.
   // Depois de salvar, o "voltar" leva para a tela de onde a pessoa veio.
   const LANCAR = { voz: () => abrirVoz(), foto: () => abrirFoto(), texto: () => abrirNovoTexto() };
-  ['voz', 'foto', 'texto'].forEach((k) => {
-    $('btn-' + k).addEventListener('click', (e) => { e.stopPropagation(); LANCAR[k](); });
-    $('lc-' + k).addEventListener('click', () => LANCAR[k]());
+  function lancar(tipo) { if (LANCAR[tipo]) LANCAR[tipo](); }
+  $('lc-mais').addEventListener('click', async () => {
+    const tipo = await menuMais('Lançar', [
+      { valor: 'voz', id: 'lm-voz', icone: '🎤', texto: 'Lançar por voz' },
+      { valor: 'foto', id: 'lm-foto', icone: '📷', texto: 'Lançar por foto' },
+      { valor: 'texto', id: 'lm-texto', icone: '✏️', texto: 'Lançar por texto', larga: true }
+    ]);
+    if (tipo) quandoHistoricoPronto(() => lancar(tipo));
   });
   $('btn-lancamentos').addEventListener('click', () => exibirLancamentos());
   $('btn-veiculos').addEventListener('click', () => Veiculos.abrirLista());
@@ -1320,7 +1343,14 @@
     obterLocalizacao().then(pos => { if (Form.token === token) Form.gps = pos; });
   }
 
+  /** V10: lançamento confirmado abre para ver (o lápis edita); o que precisa de revisão abre direto no formulário. */
   async function abrirLancamento(id) {
+    const l = await Banco.obter('lancamentos', id);
+    if (!l) return;
+    if (l.status === 'confirmado') { abrirVer({ tipo: 'lanc', id }); return; }
+    await editarLancamento(id);
+  }
+  async function editarLancamento(id) {
     const l = await Banco.obter('lancamentos', id);
     if (!l) return;
     Form.modo = (l.status === 'revisar' || l.status === 'erro_ia') ? 'revisar' : 'editar';
@@ -1426,10 +1456,12 @@
   function addItem(i = {}) {
     const div = document.createElement('div');
     div.className = 'item-linha';
+    if (i.unidade) div.dataset.unidade = i.unidade; // V10: kg, un… (vem da nota)
     div.innerHTML = `<input class="i-nome" placeholder="Item" autocapitalize="sentences" value="${esc(i.nome || '')}">` +
       '<button type="button" aria-label="Remover item">✕</button>' +
       `<div class="item-calc"><input class="i-qtd" inputmode="decimal" placeholder="Qtd" aria-label="Quantidade" value="${esc(qtdParaCampo(i.qtd))}">` +
-      `<span>×</span><input class="i-unit" inputmode="decimal" placeholder="Preço un." aria-label="Preço de cada" value="${esc(unitParaCampo(i.unitario))}">` +
+      (i.unidade && i.unidade !== 'un' ? `<span class="i-un">${esc(i.unidade)}</span>` : '') +
+      `<span>×</span><input class="i-unit" inputmode="decimal" placeholder="${i.unidade && i.unidade !== 'un' ? 'Preço do ' + esc(i.unidade) : 'Preço un.'}" aria-label="Preço de cada" value="${esc(unitParaCampo(i.unitario))}">` +
       `<span>=</span><input class="i-valor" inputmode="decimal" placeholder="Valor" aria-label="Valor do item" value="${i.valor != null ? esc(valorParaCampo(i.valor)) : ''}"></div>`;
     const q = div.querySelector('.i-qtd');
     const u = div.querySelector('.i-unit');
@@ -1451,7 +1483,9 @@
       const unitario = lerUnit(d.querySelector('.i-unit').value);
       let valor = lerValor(d.querySelector('.i-valor').value);
       if (valor == null && qtd != null && unitario != null) valor = Math.round(qtd * unitario * 100) / 100;
-      return { nome: d.querySelector('.i-nome').value.trim(), qtd, unitario, valor };
+      const item = { nome: d.querySelector('.i-nome').value.trim(), qtd, unitario, valor };
+      if (d.dataset.unidade) item.unidade = d.dataset.unidade;
+      return item;
     }).filter(i => i.nome || i.valor != null);
   }
   function atualizarSoma() {
@@ -2345,6 +2379,195 @@
   }
 
   // ------------------------------------------------------------------
+  //  V10: ver antes de editar (lançamento, gasto do veículo, despesa do grupo)
+  //  A tela "ver" só mostra; o lápis ✏️ no topo abre o formulário de sempre.
+  // ------------------------------------------------------------------
+  const Ver = { dados: null, editar: null };
+  /** "0,194 kg × R$ 35,99 o kg", "2 un × R$ 3,00" ou "" (sem quantidade). */
+  function textoQtdItem(i) {
+    if (i.qtd == null) return '';
+    const un = i.unidade || (Number.isInteger(i.qtd) ? 'un' : '');
+    const q = String(i.qtd).replace('.', ',');
+    if (i.unitario == null) return un ? `${q} ${un}` : q;
+    const preco = unitParaCampo(i.unitario);
+    return un && un !== 'un' ? `${q} ${un} × R$ ${preco} o ${un}` : `${q}${un ? ' un' : ''} × R$ ${preco}`;
+  }
+  function linhaVer(rotulo, valor) { return valor ? `<div class="ver-lin"><span>${esc(rotulo)}</span><b>${esc(valor)}</b></div>` : ''; }
+  /** Botão "Abrir no mapa": no Android abre a escolha de apps de mapa (geo:); no computador, o Google Maps. */
+  function mapaHtml(lat, lng, endereco, nome) {
+    const temGps = lat != null && lng != null && isFinite(lat) && isFinite(lng);
+    if (!temGps && !endereco) return '';
+    const texto = endereco || 'Localização registrada pelo GPS';
+    return `<button class="ver-mapa" type="button" id="ver-mapa" data-lat="${temGps ? lat : ''}" data-lng="${temGps ? lng : ''}" data-end="${esc(endereco || '')}" data-nome="${esc(nome || '')}">` +
+      `<span class="ic" aria-hidden="true">📍</span><span class="tx"><b>${esc(texto)}</b><small>Abrir no mapa</small></span><span class="seta" aria-hidden="true">›</span></button>`;
+  }
+  function linkDoMapa({ lat, lng, endereco, nome }) {
+    const android = /Android/i.test(navigator.userAgent || '');
+    const temGps = lat !== '' && lng !== '' && lat != null && lng != null;
+    if (android) {
+      if (temGps) return `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(nome || 'Lançamento')})`;
+      return 'geo:0,0?q=' + encodeURIComponent(endereco);
+    }
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(temGps ? `${lat},${lng}` : endereco);
+  }
+  function abrirMapa(b) {
+    const url = linkDoMapa({ lat: b.dataset.lat, lng: b.dataset.lng, endereco: b.dataset.end, nome: b.dataset.nome });
+    const a = document.createElement('a');
+    a.href = url;
+    if (/^https:/.test(url)) { a.target = '_blank'; a.rel = 'noopener'; }
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  /** Miniaturas das fotos (e o áudio) para a tela de ver. */
+  function fotosVerHtml(lista, idLista, rotulos) {
+    listasVisor[idLista] = lista.filter(a => a.tipo === 'foto').map(a => ({ chave: a.id, blob: a.blob || null, arquivoId: a.id }));
+    return lista.map((a, k) => {
+      if (a.tipo === 'audio') return '';
+      const r = rotulos && rotulos[k] ? rotulos[k] : '';
+      return `<div class="mini" data-ver="${esc(a.id)}" role="button" aria-label="Ver a foto">${a.blob ? `<img src="${urlDe(a.blob)}" alt="foto">` : '☁️'}<small>${esc(r || (a.blob ? 'ver' : 'no servidor'))}</small></div>`;
+    }).join('');
+  }
+  function rodapeVer(podeEditar, texto) {
+    return `<div class="ver-rodape">${podeEditar ? 'Para mudar alguma coisa, toque no lápis ✏️ lá em cima.' : esc(texto || '')}</div>`;
+  }
+  async function htmlVerLancamento(id) {
+    const l = await Banco.obter('lancamentos', id);
+    if (!l || l.excluirPendente) return null;
+    const arqs = (await Banco.porIndice('arquivos', 'lancamentoId', id)).filter(a => !a.remover);
+    const d = new Date(l.dataHora || l.criadoEm || Date.now());
+    const dataTxt = d.toLocaleDateString('pt-BR') + ' · ' + hora(d.getTime());
+    const banco = [l.banco, l.titular].filter(Boolean).join(' · ');
+    let corpo = `<div class="ver-cab"><div><div class="t">${esc(descricaoLanc(l))}</div><div class="s">${esc([l.categoria, l.meioPagamento].filter(Boolean).join(' · '))}</div></div>` +
+      `<div class="v">${l.valorTotal != null ? brl(l.valorTotal) : '—'}</div></div>` +
+      '<div class="ver-caixa">' + linhaVer('Data e hora', dataTxt) + linhaVer('Categoria', l.categoria) + linhaVer('Pagamento', l.meioPagamento) +
+      linhaVer('Banco / titular', banco) + linhaVer('Estabelecimento', l.estabelecimento) + '</div>' +
+      mapaHtml(l.lat, l.lng, l.endereco, l.estabelecimento || descricaoLanc(l));
+    const itens = (l.itens || []).filter(i => i.nome || i.valor != null);
+    if (itens.length) {
+      const soma = itens.reduce((s2, i) => s2 + (Number(i.valor) || 0), 0);
+      corpo += `<div class="ver-secao">${l.origem === 'foto' ? 'Itens da nota' : 'Itens'}</div><div class="ver-caixa">` +
+        itens.map(i => { const q = textoQtdItem(i); return `<div class="ver-item"><div>${esc(i.nome || 'Item')}${q ? `<small>${esc(q)}</small>` : ''}</div><b>${i.valor != null ? brl(i.valor) : '—'}</b></div>`; }).join('') +
+        (itens.length > 1 ? `<div class="ver-item total"><div><b>Total</b></div><b>${brl(l.valorTotal != null ? l.valorTotal : Math.round(soma * 100) / 100)}</b></div>` : '') + '</div>';
+    }
+    if (l.transcricao) corpo += `<div class="ver-secao">O que você falou</div><div class="ver-caixa"><div class="ver-lin"><span>“${esc(l.transcricao)}”</span></div></div>`;
+    const fotos = arqs.filter(a => a.tipo === 'foto');
+    const audio = arqs.find(a => a.tipo === 'audio');
+    if (fotos.length || audio) {
+      corpo += `<div class="ver-secao">${l.origem === 'foto' ? (fotos.length > 1 ? 'Fotos da nota' : 'Foto da nota') : (fotos.length ? 'Fotos e áudio' : 'Áudio')}</div>` +
+        `<div class="ver-fotos" id="ver-fotos">${fotosVerHtml(fotos, 'ver-fotos')}` +
+        (audio ? (audio.blob ? `<audio controls src="${urlDe(audio.blob)}" class="ver-audio"></audio>` : '<div class="audio">🎤 Áudio guardado no servidor</div>') : '') + '</div>';
+    }
+    corpo += rodapeVer(true);
+    return { titulo: 'Lançamento', sub: dataTxt, corpo, podeEditar: true, editar: () => editarLancamento(id) };
+  }
+  /** dados: { tipo: 'lanc' | 'reg' | 'gdesp', id } */
+  async function abrirVer(dados, empilhar = true) {
+    let r = null;
+    try {
+      if (dados.tipo === 'lanc') r = await htmlVerLancamento(dados.id);
+      else if (dados.tipo === 'reg') r = await Veiculos.htmlVer(dados.id);
+      else if (dados.tipo === 'gdesp') r = await Grupos.htmlVer(dados.id);
+    } catch (e) { r = null; }
+    if (!r) {
+      // não existe mais (excluído no formulário ou em outro celular): volta mais uma tela
+      if (!empilhar) quandoHistoricoPronto(() => { if (history.state && history.state.tela) history.back(); else exibirInicio(); });
+      return false;
+    }
+    liberarUrls();
+    Ver.dados = dados;
+    Ver.editar = r.editar;
+    $('ver-titulo').textContent = r.titulo;
+    $('ver-sub').textContent = r.sub || '';
+    $('ver-editar').classList.toggle('oculto', !r.podeEditar);
+    $('ver-corpo').innerHTML = r.corpo;
+    mostrarTela('ver', { empilhar, dados });
+    return true;
+  }
+  $('ver-voltar').onclick = () => voltar();
+  $('ver-editar').onclick = () => { if (Ver.editar) Ver.editar(); };
+  $('ver-corpo').addEventListener('click', (e) => {
+    const m = e.target.closest('#ver-mapa');
+    if (m) { abrirMapa(m); return; }
+    const f = e.target.closest('[data-ver]');
+    if (f) { const lista = f.closest('[id]'); abrirVisor(lista ? lista.id : 'ver-fotos', f.dataset.ver); }
+  });
+
+  // ------------------------------------------------------------------
+  //  V10: aviso do pedido do 🐞 resolvido (festa) ou descartado (triste)
+  //  Uma vez cada, ao abrir o app (depois do "O que há de novo"), um depois do outro.
+  // ------------------------------------------------------------------
+  function chaveAvisoPedido(p) { return p.id + ':' + p.situacao + ':' + p.situacaoEm; }
+  function dataCurta(ms) { const d = new Date(ms); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function confeteHtml() {
+    let semente = 7;
+    const rnd = () => { semente = (semente * 9301 + 49297) % 233280; return semente / 233280; };
+    const cores = ['#2f6fb0', '#e0a400', '#2a9d8f', '#d9822b', '#7a5cc7', '#c0392b', '#3fb37f'];
+    let h = '';
+    for (let i = 0; i < 70; i++) {
+      const x1 = Math.round((rnd() - 0.5) * 120);
+      h += `<i style="--c:${cores[i % cores.length]};--x1:${x1}vw;--y1:${Math.round(-30 - rnd() * 45)}vh;--x2:${Math.round(x1 * 1.15 + (rnd() - 0.5) * 20)}vw;` +
+        `--r:${Math.round(rnd() * 720 - 360)}deg;--t:${(1.6 + rnd() * 1.2).toFixed(2)}s;--d:${(0.35 + rnd() * 0.35).toFixed(2)}s"></i>`;
+    }
+    return `<div class="confete" aria-hidden="true">${h}</div>`;
+  }
+  function avisoPedidoHtml(p) {
+    const feliz = p.situacao === 'Resolvido';
+    const cab = `<div class="ap-pedido"><small>Pedido nº ${p.numero}${p.criadoEm ? ' · ' + dataCurta(p.criadoEm) : ''}${p.nomeTela ? ' · tela ' + esc(p.nomeTela) : ''}</small>` +
+      (p.texto ? `“${esc(p.texto.length > 160 ? p.texto.slice(0, 157) + '…' : p.texto)}”` : '') + '</div>';
+    if (feliz) {
+      return '<div class="fundo-dialogo"><div class="dialogo aviso-pedido feliz" role="dialog" aria-label="Pedido resolvido">' +
+        '<svg class="ap-icone" viewBox="0 0 52 52" aria-hidden="true"><circle class="c" cx="26" cy="26" r="24"/><path class="v" d="M15 27 l7 7 l15 -16"/></svg>' +
+        '<h2>Pedido resolvido! 🎉</h2><p class="ap-sub">Aquele pedido que você mandou pelo 🐞 já está no app.</p>' + cab +
+        (p.resposta ? `<div class="ap-msg"><small>💬 Mensagem do organizador</small>${esc(p.resposta)}</div>` : '') +
+        '<div class="botoes"><button class="botao primario" type="button" id="ap-ok">Oba! 🎉</button></div></div>' + confeteHtml() + '</div>';
+    }
+    return '<div class="fundo-dialogo triste-fundo"><div class="dialogo aviso-pedido triste" role="dialog" aria-label="Pedido não vai ser feito">' +
+      '<div class="ap-chuva" aria-hidden="true"><span class="nuvem">☁️</span>' +
+      [18, 34, 50, 66, 42, 58].map((x, k) => `<i style="--x:${x}%;--d:${(k * 0.17).toFixed(2)}s"></i>`).join('') + '<span class="cara">😔</span></div>' +
+      '<h2>Esse pedido não vai ser feito</h2><p class="ap-sub">O organizador analisou o seu pedido, mas ele não vai entrar no app.</p>' + cab +
+      (p.resposta ? `<div class="ap-msg triste"><small>💬 Motivo</small>${esc(p.resposta)}</div>` : '') +
+      '<div class="botoes"><button class="botao primario" type="button" id="ap-ok">Entendi</button></div></div></div>';
+  }
+  let avisandoPedidos = false;
+  let avisarDeNovo = false;
+  async function mostrarAvisosPedidos() {
+    if (avisandoPedidos) { avisarDeNovo = true; return; }
+    avisandoPedidos = true;
+    avisarDeNovo = false;
+    try {
+      // espera o "O que há de novo" (ou outra janela) fechar
+      for (let k = 0; k < 600 && ($('dialogo').firstElementChild || !naPrincipal()); k++) await new Promise(ok => setTimeout(ok, 500));
+      if ($('dialogo').firstElementChild || !naPrincipal()) return;
+      const lista = ((await Banco.lerConfig('pedidosRespondidos', [])) || []).slice().sort((a, b) => a.situacaoEm - b.situacaoEm);
+      const vistos = new Set((await Banco.lerConfig('avisosPedidosVistos', [])) || []);
+      for (const p of lista) {
+        if (vistos.has(chaveAvisoPedido(p))) continue;
+        vistos.add(chaveAvisoPedido(p));
+        await Banco.gravarConfig('avisosPedidosVistos', Array.from(vistos).slice(-200));
+        await new Promise((ok) => {
+          abrirDialogo(avisoPedidoHtml(p), () => ok());
+          $('ap-ok').onclick = () => { fecharDialogo(); ok(); };
+        });
+        await new Promise(ok => quandoHistoricoPronto(() => setTimeout(ok, 250)));
+      }
+    } finally {
+      avisandoPedidos = false;
+    }
+    if (avisarDeNovo) mostrarAvisosPedidos(); // chegou a lista nova (sincronização) enquanto mostrava
+  }
+  /** A sincronização trouxe a lista de pedidos respondidos (servidor v10). */
+  async function receberPedidosRespondidos(lista) {
+    if (!Array.isArray(lista)) return;
+    const vistos = (await Banco.lerConfig('avisosPedidosVistos', null));
+    // a primeira vez (app recém-instalado ou atualizado): os que já estavam respondidos antes desta versão também avisam
+    if (vistos === null) await Banco.gravarConfig('avisosPedidosVistos', []);
+    await Banco.gravarConfig('pedidosRespondidos', lista.slice(-100));
+    if (avisarPedidosNestaAbertura) { avisarPedidosNestaAbertura = false; mostrarAvisosPedidos(); }
+  }
+  let avisarPedidosNestaAbertura = true; // só ao abrir o app (a 1ª sincronização); os que chegarem depois esperam a próxima abertura
+
+  // ------------------------------------------------------------------
   //  Funções do app usadas pelas telas dos veículos (veiculos.js)
   // ------------------------------------------------------------------
   window.App = {
@@ -2352,6 +2575,8 @@
     obterLocalizacao, mensagemErroGeral, miniatura, listasVisor, toqueNaMiniatura, baixarArquivo, erroAoBaixar,
     tirarFotos, adicionarFotos, fmtDuracao, urlDe, agendarSync, mostrarTela, voltar, exibirInicio, quandoHistoricoPronto,
     chaveDia, ehDinheiro, normalizarEmail, dialogoCampos, mostrarDica, abrirCamada, fecharCamada,
+    // V10
+    lancar, exibirLancamentos, abrirVer, mapaHtml, linhaVer, rodapeVer, fotosVerHtml, textoQtdItem, receberPedidosRespondidos, mostrarAvisosPedidos, listasVisor,
     telaAtual: () => telaAtual,
     dadosTela: () => dadosTela
   };
@@ -2383,6 +2608,7 @@
       await Banco.gravarConfig('versaoVista', VERSAO_DO_APP);
       setTimeout(abrirNovidades, 700);
     }
+    setTimeout(mostrarAvisosPedidos, 1200); // V10: pedidos do 🐞 respondidos (os que já estão no celular)
     talvezPedirEmail(); // conta sem e-mail: pergunta toda vez que o app abre
   }
 

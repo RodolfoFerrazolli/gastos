@@ -126,15 +126,11 @@
 
     <div id="alertas"></div>
 
-    <!-- V7: Hoje e Total, o cartão dos lançamentos (com os 3 botões) e o cartão dos veículos -->
+    <!-- V7: Hoje e Total, o cartão dos lançamentos e o cartão dos veículos.
+         V10: o cartão Lançamentos mostra o total do mês e o último; para lançar, o "+" da tela Lançamentos. -->
     <div class="numeros" id="ini-numeros"></div>
     <div class="bloco-ini" id="btn-lancamentos" role="button" tabindex="0">
-      <div class="bloco-topo"><div><div class="bloco-titulo">🧾 Lançamentos</div><div class="bloco-sub" id="ini-ultimo"></div></div><span class="seta" aria-hidden="true">›</span></div>
-      <div class="tres-botoes">
-        <button type="button" id="btn-voz" aria-label="Lançar por voz">🎤<span>Voz</span></button>
-        <button type="button" id="btn-foto" aria-label="Lançar por foto">📷<span>Foto</span></button>
-        <button type="button" id="btn-texto" aria-label="Lançar por texto">✏️<span>Texto</span></button>
-      </div>
+      <div class="bloco-topo"><div><div class="bloco-titulo">🧾 Lançamentos</div><div class="bloco-sub ini-resumo" id="ini-ultimo"></div></div><span class="seta" aria-hidden="true">›</span></div>
     </div>
     <div class="bloco-ini" id="btn-veiculos" role="button" tabindex="0">
       <div class="bloco-topo"><div><div class="bloco-titulo">🚗 Veículos</div><div class="bloco-sub" id="ini-veiculos"></div></div><span class="seta" aria-hidden="true">›</span></div>
@@ -146,21 +142,28 @@
     <div class="espaco-fim"></div>
   </section>
 
-  <!-- ============ LANÇAMENTOS (V7): os 3 botões e o histórico de todos os gastos ============ -->
+  <!-- ============ LANÇAMENTOS (V7; V10: o "Extrato" e o "+" para lançar) ============ -->
   <section id="tela-lancamentos" class="tela oculto">
     <header class="topo">
       <button class="botao-icone" id="lc-voltar" aria-label="Voltar">←</button>
       <div class="topo-textos"><div class="topo-titulo">Lançamentos</div><div class="topo-sub">Histórico de todos os gastos</div></div>
       <span></span>
     </header>
-    <div class="tres-botoes solto">
-      <button type="button" id="lc-voz" aria-label="Lançar por voz">🎤<span>Voz</span></button>
-      <button type="button" id="lc-foto" aria-label="Lançar por foto">📷<span>Foto</span></button>
-      <button type="button" id="lc-texto" aria-label="Lançar por texto">✏️<span>Texto</span></button>
-    </div>
     <div id="lc-grupos" class="lc-grupos"></div>
     <div class="totais" id="totais"></div>
-    <div id="lista"></div>
+    <div class="extrato-titulo">Extrato</div>
+    <div id="lista" class="com-fab"></div>
+    <button id="lc-mais" class="fab" type="button" aria-label="Lançar" title="Lançar"><span aria-hidden="true">+</span></button>
+  </section>
+
+  <!-- ============ VER (V10): lançamento, gasto do veículo ou despesa do grupo, só para olhar; o lápis edita ============ -->
+  <section id="tela-ver" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="ver-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="ver-titulo">Lançamento</div><div class="topo-sub" id="ver-sub"></div></div>
+      <div class="topo-acoes"><button class="botao-icone" id="ver-editar" type="button" aria-label="Editar" title="Editar">✏️</button></div>
+    </header>
+    <div id="ver-corpo"></div>
   </section>
 
   <!-- ============ FORMULÁRIO (novo, editar, revisar) ============ -->
@@ -413,6 +416,13 @@
       <label for="vf-obs">Observação <small class="opcional">(opcional)</small></label>
       <textarea id="vf-obs" rows="3" maxlength="1000" autocapitalize="sentences" placeholder="Ex.: Carro alugado para a viagem"></textarea>
       <small class="contador-letras" id="vf-obs-contador"></small>
+      <!-- V10: fotos do veículo (quantas quiser; aparecem no ℹ️) -->
+      <label>Fotos do veículo <small class="opcional">(opcional)</small></label>
+      <div class="fotos" id="vf-fotos"></div>
+      <div class="linha-botoes botoes-foto">
+        <button class="botao pequeno" type="button" id="vf-camera">📷 Tirar foto</button>
+        <label class="botao pequeno arquivo">🖼️ Galeria<input type="file" accept="image/*" multiple id="vf-galeria"></label>
+      </div>
       <p class="erro" id="vf-erro"></p>
       <div class="rodape-form">
         <button class="botao primario grande" id="vf-salvar" type="button">Salvar</button>

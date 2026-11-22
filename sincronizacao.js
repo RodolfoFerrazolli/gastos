@@ -109,6 +109,7 @@ const Sync = (() => {
   /** Tira do celular o veículo, os gastos dele e as fotos e áudios desses gastos. */
   async function apagarVeiculoLocal(id) {
     for (const r of await Banco.porIndice('registros', 'veiculoId', id)) await apagarLocal(r.id, 'registros');
+    for (const a of await Banco.porIndice('arquivos', 'lancamentoId', id)) await Banco.apagar('arquivos', a.id); // V10: fotos do veículo
     await Banco.apagar('veiculos', id);
   }
 
@@ -217,6 +218,7 @@ const Sync = (() => {
       const novo = { id: s.id, criadoEm: s.criadoEm || Date.now(), sync: 'ok', tentouEnviar: true };
       copiarVeiculo(novo, s);
       await Banco.gravar('veiculos', novo);
+      await sincronizarArquivos(s.id, s.arquivos); // V10: fotos do veículo
       return s.meu === false ? 'compartilhado' : 'novo';
     }
     if (s.excluido) { await apagarVeiculoLocal(s.id); return 'excluido'; }
@@ -234,6 +236,7 @@ const Sync = (() => {
       CAMPOS_VEICULO_SERVIDOR.forEach(k => { if (s[k] !== undefined) local[k] = s[k]; });
     }
     await Banco.gravar('veiculos', local);
+    await sincronizarArquivos(s.id, s.arquivos); // V10: fotos do veículo
     return 'ok';
   }
 
@@ -701,8 +704,9 @@ const Sync = (() => {
           .filter(a => !a.enviado && !a.remover && a.blob)
           .sort((a, b) => (a.tipo === 'audio' ? 0 : 1) - (b.tipo === 'audio' ? 0 : 1) || (a.criadoEm || 0) - (b.criadoEm || 0));
         for (const a of arquivos) {
-          // o arquivo é de um lançamento ou de um gasto de veículo (V4)
-          const l = (await Banco.obter('lancamentos', a.lancamentoId)) || (await Banco.obter('registros', a.lancamentoId));
+          // o arquivo é de um lançamento, de um gasto de veículo (V4) ou do próprio veículo (V10)
+          const l = (await Banco.obter('lancamentos', a.lancamentoId)) || (await Banco.obter('registros', a.lancamentoId)) ||
+            (await Banco.obter('veiculos', a.lancamentoId));
           if (!l || l.excluirPendente || (l.sync === 'pendente' && !l.versaoBase)) continue; // o lançamento ainda não chegou ao servidor
           avisar('sincronizando', { manual, visivel, detalhe: a.tipo === 'audio' ? 'Enviando áudio…' : 'Enviando fotos…' });
           const base64 = await blobParaBase64(a.blob);
@@ -766,6 +770,11 @@ const Sync = (() => {
           };
           if (m.audio) dados.audio = { mime: m.audioMime || m.audio.type || 'audio/webm', base64: await blobParaBase64(m.audio) };
           if (m.imagem) dados.imagem = { mime: 'image/jpeg', base64: await blobParaBase64(m.imagem) };
+          // V10: fotos tiradas ou da galeria (o servidor antigo ignora)
+          if (Array.isArray(m.fotos) && m.fotos.length) {
+            dados.fotos = [];
+            for (const f of m.fotos.slice(0, 5)) dados.fotos.push({ mime: f.type || 'image/jpeg', base64: await blobParaBase64(f) });
+          }
           const r = await item(() => Api.chamar('enviarMelhoria', { melhoria: dados }, { tempoMs: 120000 }), resumo, 'pedido de melhoria');
           if (!r) continue;
           const resto = ((await Banco.lerConfig('melhoriasPendentes', [])) || []).filter(x => x.id !== m.id);
@@ -787,8 +796,12 @@ const Sync = (() => {
       // o endereço do app vai junto: o painel do organizador monta o link de convite com ele;
       // V5: os veículos que o celular já tem (o que for novo para ele, ex.: acabou de ser compartilhado, vem com todos os gastos)
       const conhecidos = (await Banco.todos('veiculos')).filter(v => v.versaoBase > 0).map(v => v.id);
-      const r = await Api.chamar('atualizacoes', { desde, urlApp: location.origin + location.pathname, conhecidos }, { tempoMs: 60000 });
+      // V10: "pedidos": os pedidos do 🐞 desta conta que o organizador resolveu ou descartou
+      const r = await Api.chamar('atualizacoes', { desde, urlApp: location.origin + location.pathname, conhecidos, pedidos: true }, { tempoMs: 60000 });
       await aplicarPerfilServidor(r);
+      if (Array.isArray(r.pedidos) && window.App && App.receberPedidosRespondidos) {
+        try { await App.receberPedidosRespondidos(r.pedidos); } catch (e) { /* não atrapalha a sincronização */ }
+      }
       for (const s of r.lancamentos || []) {
         const res = await aplicarDoServidor(s);
         if (res === 'interpretado') { resumo.interpretados++; if (s.origem === 'foto') resumo.notas++; }

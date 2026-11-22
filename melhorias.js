@@ -67,7 +67,13 @@ const Melhorias = (() => {
     52: 'Despesa do grupo (nova ou editar)',
     53: 'Pessoa do grupo (adicionar ou editar)',
     54: 'Relatório do grupo',
-    55: 'Quem falta te pagar (grupo)'
+    55: 'Quem falta te pagar (grupo)',
+    56: 'Menu do "+" dos Lançamentos',
+    57: 'Ver lançamento',
+    58: 'Ver gasto do veículo',
+    59: 'Ver despesa do grupo',
+    60: 'Pedido resolvido (aviso)',
+    61: 'Pedido não vai ser feito (aviso)'
   };
   const LISTA = { manutencao: 20, seguro: 23, ipva: 26, licenciamento: 28, multa: 30, outros: 32, galeria: 34 };
   const ITEM = { abastecimento: 19, manutencao: 21, seguro: 24, ipva: 27, licenciamento: 29, multa: 31, outros: 33, galeria: 35 };
@@ -87,6 +93,9 @@ const Melhorias = (() => {
   function telaAtual() {
     let num = 0;
     if (visivel('visor')) num = 8;
+    else if (document.querySelector('.aviso-pedido.feliz')) num = 60; // V10
+    else if (document.querySelector('.aviso-pedido.triste')) num = 61;
+    else if (document.querySelector('.folha-mais') && App().telaAtual() === 'lancamentos') num = 56;
     else if (document.querySelector('.dialogo.exportar')) num = 46; // V8
     else if (document.querySelector('.dialogo.g-folha')) num = 55; // V9
     else if (visivel('recorte')) num = 7;
@@ -99,6 +108,7 @@ const Melhorias = (() => {
       else if (tela === 'v-menu') num = tipo === 'impostos' ? 25 : 22;
       else if (tela === 'grupo') num = ABA_GRUPO[typeof Grupos !== 'undefined' ? Grupos.abaAtual() : ''] || 48;
       else if (tela === 'v-gastos') num = typeof Relatorio !== 'undefined' && Relatorio.abaAtual() === 'grafico' ? 44 : 43;
+      else if (tela === 'ver') num = ({ lanc: 57, reg: 58, gdesp: 59 })[(App().dadosTela() || {}).tipo] || 57; // V10
       else num = TELAS_SIMPLES[tela] || 0;
     }
     return { num, nome: CATALOGO[num] || App().telaAtual() || 'tela' };
@@ -156,11 +166,21 @@ const Melhorias = (() => {
     }
   }
 
-  function modeloDoCelular() {
+  // V10: o Chrome novo esconde o modelo no texto do navegador ("K"); o modelo de verdade vem do Aparelho.info()
+  async function modeloDoCelular() {
     const ua = navigator.userAgent || '';
     const m = ua.match(/Android\s+([\d.]+);\s*([^;)]+)/);
-    return m ? `${m[2].trim()} · Android ${m[1]}` : ua.slice(0, 100);
+    let modelo = m && m[2].trim() !== 'K' ? m[2].trim() : '';
+    let android = m ? m[1] : '';
+    try {
+      const i = await Aparelho.info();
+      if (i.modelo) modelo = i.modelo;
+      if (i.android) android = i.android;
+    } catch (e) { /* fica o do navegador */ }
+    if (modelo) return android ? `${modelo} · Android ${android}` : modelo;
+    return m ? `celular · Android ${android}` : ua.slice(0, 100);
   }
+  const MAX_IMAGENS = 5; // a imagem da tela + fotos (tirar foto ou galeria)
 
   // ---- janela do pedido ----
   let P = null; // pedido sendo montado
@@ -168,7 +188,7 @@ const Melhorias = (() => {
     if (P) return;
     if (Gravador.gravando()) { App().toast('Termine a gravação que está em andamento antes.'); return; }
     const tela = telaAtual();
-    P = { id: novoId(), tela, imagem: null, audio: null, duracao: 0, relogio: null, url: '' };
+    P = { id: novoId(), tela, imagem: null, audio: null, duracao: 0, relogio: null, url: '', fotos: [] };
     const pedido = P;
     App().toast('Preparando…', 1500);
     pedido.imagem = await imagemDaTela();
@@ -178,7 +198,11 @@ const Melhorias = (() => {
     App().abrirDialogo('<div class="fundo-dialogo"><div class="dialogo pedido-melhoria" role="dialog" aria-label="Avisar um problema ou dar uma ideia">' +
       '<h2>🐞 Problema ou ideia</h2>' +
       '<p class="dica">Conte o que está errado nesta tela ou o que pode melhorar. O pedido vai só para o organizador, junto com uma imagem desta tela.</p>' +
-      (pedido.url ? `<img class="pedido-tela" src="${pedido.url}" alt="Imagem desta tela">` : '') +
+      // V10: a imagem da tela (com × para tirar) e mais fotos (tirar foto ou da galeria), até 5 no total
+      '<div class="pm-fotos" id="pm-fotos"></div>' +
+      '<div class="pm-botoes"><button class="botao" type="button" id="pm-camera">📷 Tirar foto</button>' +
+      '<label class="botao arquivo" id="pm-galeria-botao">🖼️ Galeria<input type="file" accept="image/*" multiple id="pm-galeria"></label></div>' +
+      '<div class="pm-conta" id="pm-conta"></div>' +
       '<button class="botao" type="button" id="pm-gravar">🎤 Gravar áudio</button>' +
       '<div id="pm-audio"></div>' +
       '<label for="pm-texto">Ou escreva (opcional)</label>' +
@@ -187,8 +211,45 @@ const Melhorias = (() => {
       '<div class="botoes"><button class="botao" type="button" id="pm-cancelar">Cancelar</button>' +
       '<button class="botao primario" type="button" id="pm-enviar">Enviar</button></div></div></div>', () => descartar());
     $('pm-gravar').onclick = () => alternarGravacao();
+    renderFotos();
+    $('pm-fotos').addEventListener('click', (e) => {
+      const x = e.target.closest('[data-tirar]');
+      if (!x || !P) return;
+      if (x.dataset.tirar === 'tela') { if (P.url) URL.revokeObjectURL(P.url); P.imagem = null; P.url = ''; }
+      else P.fotos = P.fotos.filter((f) => f.id !== x.dataset.tirar);
+      renderFotos();
+    });
+    $('pm-camera').onclick = async () => {
+      if (!P || cabem() <= 0) return;
+      const pedido = P;
+      const novas = [];
+      if (await App().tirarFotos(novas, { tituloCamera: 'Foto para o pedido' }) && P === pedido) { pedido.fotos.push(...novas.slice(0, cabem())); renderFotos(); }
+    };
+    $('pm-galeria').onchange = async (e) => {
+      if (!P) return;
+      const pedido = P;
+      const novas = [];
+      if (await App().adicionarFotos(e.target, novas) && P === pedido) { pedido.fotos.push(...novas.slice(0, cabem())); renderFotos(); }
+    };
     $('pm-cancelar').onclick = () => { App().fecharDialogo(); descartar(); };
     $('pm-enviar').onclick = () => enviar();
+  }
+
+  function cabem() { return P ? MAX_IMAGENS - (P.imagem ? 1 : 0) - P.fotos.length : 0; }
+  function renderFotos() {
+    const caixa = $('pm-fotos');
+    if (!caixa || !P) return;
+    const itens = [];
+    if (P.imagem && P.url) itens.push(`<div class="pm-foto"><img src="${P.url}" alt="Imagem desta tela"><button class="x" type="button" data-tirar="tela" aria-label="Tirar a imagem da tela">×</button><small>esta tela</small></div>`);
+    P.fotos.forEach((f) => itens.push(`<div class="pm-foto"><img src="${App().urlDe(f.blob)}" alt="foto"><button class="x" type="button" data-tirar="${f.id}" aria-label="Tirar esta foto">×</button><small>foto</small></div>`));
+    caixa.innerHTML = itens.join('');
+    caixa.classList.toggle('oculto', !itens.length);
+    const total = itens.length;
+    $('pm-conta').textContent = total ? `${total} de ${MAX_IMAGENS} ${MAX_IMAGENS === 1 ? 'foto' : 'fotos'}` : `Você pode juntar até ${MAX_IMAGENS} fotos.`;
+    const cheio = cabem() <= 0;
+    $('pm-camera').disabled = cheio;
+    $('pm-galeria').disabled = cheio;
+    $('pm-galeria-botao').classList.toggle('desativado', cheio);
   }
 
   function descartar() {
@@ -240,7 +301,8 @@ const Melhorias = (() => {
     const registro = {
       id: pedido.id, criadoEm: Date.now(), tela: pedido.tela.num ? String(pedido.tela.num) : '', nomeTela: pedido.tela.nome, texto,
       audio: pedido.audio, audioMime: pedido.audio ? (pedido.audio.type || 'audio/webm') : '', duracao: pedido.duracao || 0,
-      imagem: pedido.imagem, versaoApp: typeof VERSAO_DO_APP !== 'undefined' ? VERSAO_DO_APP : '', aparelho: modeloDoCelular()
+      imagem: pedido.imagem, fotos: pedido.fotos.map((f) => f.blob), versaoApp: typeof VERSAO_DO_APP !== 'undefined' ? VERSAO_DO_APP : '',
+      aparelho: await modeloDoCelular()
     };
     try {
       const lista = (await Banco.lerConfig('melhoriasPendentes', [])) || [];

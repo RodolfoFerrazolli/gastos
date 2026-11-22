@@ -319,9 +319,9 @@ const Veiculos = (() => {
       VR.audiosNovos = [];
       return true;
     }
-    if (tela === 'veiculo-form' && VF.alterado) {
+    if (tela === 'veiculo-form' && (VF.alterado || VF.fotosNovas.length)) {
       const ok = await App().confirmar('Descartar as alterações do veículo?', 'Descartar', 'Continuar editando');
-      if (ok) VF.alterado = false;
+      if (ok) { VF.alterado = false; VF.fotosNovas = []; VF.removerIds = []; }
       return ok;
     }
     return true;
@@ -415,7 +415,7 @@ const Veiculos = (() => {
   // ------------------------------------------------------------------
   //  Cadastro do veículo
   // ------------------------------------------------------------------
-  const VF = { id: null, alterado: false };
+  const VF = { id: null, alterado: false, existentes: [], fotosNovas: [], removerIds: [] }; // V10: fotos do veículo
 
   async function prepararFormVeiculo(id) {
     let v = null;
@@ -433,6 +433,10 @@ const Veiculos = (() => {
     $('vf-cor').value = v ? v.cor || '' : '';
     $('vf-obs').value = v ? v.observacao || '' : '';
     contarLetrasObs();
+    VF.existentes = v ? (await Banco.porIndice('arquivos', 'lancamentoId', v.id)).filter(a => a.tipo === 'foto' && !a.remover) : [];
+    VF.fotosNovas = [];
+    VF.removerIds = [];
+    renderFotosVeiculo();
     // veículo de antes da V5, sem a cor: o campo já aparece marcado
     $('vf-erro').textContent = v && !v.cor ? 'Falta a cor do veículo.' : '';
     $('vf-cor').classList.toggle('falta', !!(v && !v.cor));
@@ -467,6 +471,19 @@ const Veiculos = (() => {
     botao.disabled = true;
     try {
       await Banco.gravar('veiculos', v);
+      // V10: fotos do veículo (o "lancamentoId" do arquivo é o ID do veículo)
+      const agoraF = Date.now();
+      for (let i = 0; i < VF.fotosNovas.length; i++) {
+        const f = VF.fotosNovas[i];
+        await Banco.gravar('arquivos', { id: f.id, lancamentoId: v.id, tipo: 'foto', mime: 'image/jpeg', blob: f.blob, tamanho: f.blob.size, criadoEm: agoraF + i, enviado: false });
+      }
+      for (const id of VF.removerIds) {
+        const a = await Banco.obter('arquivos', id);
+        if (!a) continue;
+        if (a.enviado) { a.remover = true; await Banco.gravar('arquivos', a); } else await Banco.apagar('arquivos', id);
+      }
+      VF.fotosNovas = [];
+      VF.removerIds = [];
     } catch (e) {
       toast('Não foi possível salvar no aparelho: ' + e.message, 5000);
       return;
@@ -477,6 +494,14 @@ const Veiculos = (() => {
     VF.alterado = false;
     App().voltar();
     App().agendarSync(800);
+  }
+
+  function renderFotosVeiculo() {
+    const existentes = VF.existentes.filter(a => !VF.removerIds.includes(a.id));
+    const html = existentes.map(a => App().miniatura(a.blob, 'e:' + a.id)).concat(VF.fotosNovas.map(f => App().miniatura(f.blob, 'n:' + f.id)));
+    App().listasVisor['vf-fotos'] = existentes.map(a => ({ chave: 'e:' + a.id, blob: a.blob || null, arquivoId: a.id }))
+      .concat(VF.fotosNovas.map(f => ({ chave: 'n:' + f.id, blob: f.blob, arquivoId: '' })));
+    $('vf-fotos').innerHTML = html.join('') || '<small class="dica">Nenhuma foto.</small>';
   }
 
   function contarLetrasObs() {
@@ -662,15 +687,67 @@ const Veiculos = (() => {
       comp = `${esc(primeiroNome(v.dono) || 'Outra pessoa')} compartilhou com você.`;
     }
     const obs = v.observacao ? `<div class="info-obs">${esc(v.observacao)}</div>` : '<span class="dica">Nenhuma observação.</span>';
+    const fotos = (await Banco.porIndice('arquivos', 'lancamentoId', v.id)).filter(a => a.tipo === 'foto' && !a.remover);
     App().abrirDialogo('<div class="fundo-dialogo"><div class="dialogo info-veiculo" role="dialog"><h2>ℹ️ Informações do veículo</h2>' +
       linha('Montadora', v.montadora) + linha('Modelo', v.modelo) + linha('Ano', v.ano ? String(v.ano) : '') +
       linha('Placa', v.placa) + linha('Cor', v.cor) +
       `<div class="info-linha"><small>Observação</small><div>${obs}</div></div>` +
       linha('Dono', ehMeu(v) ? 'Você' : (v.dono || 'Outra pessoa')) +
       `<div class="info-linha"><small>Compartilhamento</small><div>${comp}</div></div>` +
+      // V10: fotos do veículo
+      `<div class="info-linha"><small>Fotos</small><div>${fotos.length ? `<div class="ver-fotos" id="vi-fotos">${App().fotosVerHtml(fotos, 'vi-fotos')}</div>` : '<span class="dica">Nenhuma foto.</span>'}</div></div>` +
       '<div class="botoes"><button class="botao primario" type="button" id="vi-ok">Fechar</button></div></div></div>',
     () => { /* só fecha */ }, { fora: true });
     $('vi-ok').onclick = () => App().fecharDialogo();
+    const vf = $('vi-fotos');
+    if (vf) vf.addEventListener('click', (e) => App().toqueNaMiniatura(e, 'vi-fotos'));
+  }
+
+  // ------------------------------------------------------------------
+  //  V10: ver o gasto do veículo antes de editar (o lápis ✏️ abre o formulário de sempre)
+  // ------------------------------------------------------------------
+  async function abrirRegistro(id) {
+    const r = await Banco.obter('registros', id);
+    if (!r || r.excluirPendente) { toast('Este item não existe mais.'); return; }
+    // o que ainda precisa de revisão (ou a leitura da IA) vai direto para o formulário
+    if (r.status === 'revisar' || r.status === 'aguardando_ia' || r.status === 'erro_ia') { ir('v-registro', { registroId: id }); return; }
+    App().abrirVer({ tipo: 'reg', id });
+  }
+  async function htmlVer(id) {
+    const r = await Banco.obter('registros', id);
+    if (!r || r.excluirPendente) return null;
+    const v = await veiculoAtivo(r.veiculoId);
+    if (!v) return null;
+    const t = TIPOS[r.tipo] || { icone: '🚗', nome: 'Gasto' };
+    const L = App().linhaVer;
+    const arqs = (await Banco.porIndice('arquivos', 'lancamentoId', r.id)).filter(a => !a.remover);
+    const titulo = r.tipo === 'abastecimento' ? (r.combustivel || 'Abastecimento') : (r.descricao && r.tipo !== 'galeria' ? r.descricao : t.nome);
+    const sub = [r.tipo === 'abastecimento' && r.tanqueCheio ? 'Tanque cheio' : '', dataCurta(r.data)].filter(Boolean).join(' · ');
+    const un = unidade(r.combustivel);
+    let corpo = `<div class="ver-cab"><div><div class="t">${t.icone} ${esc(titulo)}</div><div class="s">${esc(sub)}</div></div>` +
+      (r.tipo !== 'galeria' ? `<div class="v">${r.valor != null ? brl(r.valor) : '—'}</div>` : '') + '</div><div class="ver-caixa">';
+    if (r.tipo === 'abastecimento') {
+      corpo += L('Litros', r.litros != null ? fmtNum(r.litros, 3) + ' ' + un : '') + L(un === 'm³' ? 'Preço do m³' : 'Preço do litro', r.precoLitro != null ? brl3(r.precoLitro) : '');
+    }
+    corpo += L('Hodômetro', r.hodometro != null && TEM_KM.has(r.tipo) ? fmtKm(r.hodometro) : '') +
+      L('Data', r.tipo !== 'abastecimento' ? dataCurta(r.data) : '') +
+      L('Seguradora', r.seguradora) + L('Nº da apólice', r.apolice) + L('Validade', r.validade ? dataCurta(r.validade) : '') +
+      L('Descrição', r.tipo !== 'abastecimento' && r.descricao && r.descricao !== titulo ? r.descricao : '') +
+      L('Pagamento', r.formaPagamento) + L('Lançado por', autorDe(r.participante) || (r.meu === false ? 'outra pessoa' : 'você')) + '</div>';
+    const coord = String(r.local || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    const lat = r.lat != null ? r.lat : (coord ? Number(coord[1]) : null);
+    const lng = r.lng != null ? r.lng : (coord ? Number(coord[2]) : null);
+    corpo += App().mapaHtml(lat, lng, coord ? '' : r.local, r.local || t.nome);
+    const fotos = arqs.filter(a => a.tipo === 'foto');
+    const audios = arqs.filter(a => a.tipo === 'audio');
+    if (fotos.length || audios.length) {
+      corpo += `<div class="ver-secao">${fotos.length && audios.length ? 'Fotos e áudio' : fotos.length ? 'Fotos' : 'Áudio'}</div>` +
+        `<div class="ver-fotos" id="ver-fotos">${App().fotosVerHtml(fotos, 'ver-fotos')}` +
+        audios.map(a => a.blob ? `<audio controls src="${App().urlDe(a.blob)}" class="ver-audio"></audio>` : '<div class="audio">🎤 Áudio guardado no servidor</div>').join('') + '</div>';
+    }
+    const pode = podeAlterar(r, v);
+    corpo += App().rodapeVer(pode, 'Só quem lançou (ou o dono do veículo) pode alterar.');
+    return { titulo: t.nome, sub: nomeVeiculo(v), corpo, podeEditar: pode, editar: () => ir('v-registro', { registroId: id }) };
   }
 
   /** Tocar no ⚠️ de um gasto explica o porquê. */
@@ -2047,7 +2124,7 @@ const Veiculos = (() => {
       const aviso = e.target.closest('[data-aviso]');
       if (aviso) { explicarAviso(aviso.dataset.aviso, aviso.dataset.id); return; } // o ⚠️ explica, não abre o gasto
       const c = e.target.closest('[data-registro]');
-      if (c) ir('v-registro', { registroId: c.dataset.registro });
+      if (c) abrirRegistro(c.dataset.registro);
     };
     $('vx-lista').addEventListener('click', abrirCartao);
     $('vl-lista').addEventListener('click', abrirCartao);
@@ -2063,6 +2140,17 @@ const Veiculos = (() => {
       ir('v-registro', { veiculoId: d.veiculoId, tipo: d.tipo });
     };
     $('vf-salvar').onclick = salvarVeiculo;
+    // V10: fotos do veículo (tirar foto ou da galeria)
+    $('vf-camera').onclick = async () => { if (await App().tirarFotos(VF.fotosNovas, OPCOES_FOTO_VEICULO)) { VF.alterado = true; renderFotosVeiculo(); } };
+    $('vf-galeria').onchange = async (e) => { if (await App().adicionarFotos(e.target, VF.fotosNovas, OPCOES_FOTO_VEICULO)) { VF.alterado = true; renderFotosVeiculo(); } };
+    $('vf-fotos').addEventListener('click', (e) => {
+      const chave = App().toqueNaMiniatura(e, 'vf-fotos');
+      if (!chave) return;
+      const [tipo, id] = chave.split(/:(.+)/);
+      if (tipo === 'e') VF.removerIds.push(id); else VF.fotosNovas = VF.fotosNovas.filter(f => f.id !== id);
+      VF.alterado = true;
+      renderFotosVeiculo();
+    });
     $('vf-excluir').onclick = excluirVeiculo;
     $('tela-veiculo-form').addEventListener('input', () => { VF.alterado = true; $('vf-erro').textContent = ''; });
     const placa = $('vf-placa');
@@ -2101,7 +2189,8 @@ const Veiculos = (() => {
       // V8 (planilha): o veículo é compartilhado (soma os gastos de todos)?
       compartilhado: async (v, regs) => !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false)
     },
-    abrirRegistro: (id) => ir('v-registro', { registroId: id }),
+    abrirRegistro: (id) => abrirRegistro(id),
+    htmlVer, // V10: tela de ver (app.js)
     // usados nos testes
     _textoMascara: textoMascara, _normalizarPlaca: normalizarPlaca, _analisarKm: analisarKm,
     _difValores: difValores, _lerDataDigitada: lerDataDigitada, _normalizarCor: normalizarCor

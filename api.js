@@ -3,7 +3,7 @@
 // =====================================================================
 // Versão do app (fica aqui, e não no config.js, para o config.js de quem já
 // instalou continuar valendo nas atualizações).
-const VERSAO_DO_APP = '9';
+const VERSAO_DO_APP = '10';
 
 const Api = (() => {
   class ErroRede extends Error {}
