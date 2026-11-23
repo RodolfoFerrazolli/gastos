@@ -22,14 +22,16 @@ const Sync = (() => {
   const CAMPOS_EDITAVEIS = ['dataHora', 'descricao', 'itens', 'valorTotal', 'categoria', 'meioPagamento', 'banco',
     'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm', 'qrNota', 'fotosNota'];
   // Campos que só o servidor preenche
-  const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'];
+  const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota',
+    'enderecoDe', 'alteradoPor']; // V11: de onde veio o endereço; quem mexeu por último ("IA" = entrou direto: ✨)
   // Veículos (V4; a cor entrou na V5)
   const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'observacao', 'alteradoEm'];
   // do veículo, só o servidor sabe: se é da conta ("meu") ou compartilhado com ela, e quem é o dono (V5)
   const CAMPOS_VEICULO_SERVIDOR = ['meu', 'dono'];
   const CAMPOS_REGISTRO = ['veiculoId', 'tipo', 'data', 'valor', 'formaPagamento', 'descricao', 'hodometro', 'combustivel',
     'tanqueCheio', 'precoLitro', 'litros', 'seguradora', 'apolice', 'validade', 'local', 'lat', 'lng', 'status', 'fonte',
-    'qrNota', 'observacao', 'alteradoEm'];
+    'qrNota', 'observacao', 'alteradoEm',
+    'desconto', 'itens']; // V11: desconto do abastecimento (o "valor" é o valor pago) e itens da manutenção
   const CAMPOS_REGISTRO_SERVIDOR = ['qtdFotos', 'participante', 'alteradoPor', 'meu'];
 
   function conexao() {
@@ -357,6 +359,9 @@ const Sync = (() => {
     const ia = new Set(reg.lidosIA || []);
     const livre = (k) => reg[k] == null || reg[k] === '' || auto.has(k) || ia.has(k);
     const usar = (k, v) => { if (v != null && v !== '' && livre(k)) { reg[k] = v; auto.delete(k); ia.add(k); } };
+    // V11: aqui dentro o "valor" é o total da bomba; no fim volta a ser o valor pago (total − desconto)
+    if (reg.valor != null && Number(reg.desconto) > 0) reg.valor = Math.round((Number(reg.valor) + Number(reg.desconto)) * 100) / 100;
+    if (c.desconto > 0 && (reg.desconto == null || reg.desconto === '' || !(Number(reg.desconto) > 0) || ia.has('desconto'))) { reg.desconto = c.desconto; ia.add('desconto'); }
     usar('combustivel', c.combustivel);
     usar('hodometro', c.hodometro);
     usar('precoLitro', c.precoLitro);
@@ -382,9 +387,32 @@ const Sync = (() => {
     } else if (base.length === 3) {
       reg.calculado = '';
     }
+    if (reg.valor != null && Number(reg.desconto) > 0) reg.valor = Math.round((Number(reg.valor) - Number(reg.desconto)) * 100) / 100;
     reg.automaticos = Array.from(auto);
     reg.lidosIA = Array.from(ia).filter(k => !auto.has(k));
     return reg;
+  }
+
+  /**
+   * V11: o que falta num abastecimento lido pela IA (vazio = nada). Sem nada faltando e sem dúvida da leitura,
+   * ele entra confirmado direto (com o selo "✨ IA"); senão vai para "Revisar", com o que falta marcado.
+   */
+  function faltaNoAbastecimento(reg) {
+    const falta = [];
+    if (!reg.combustivel) falta.push('combustivel');
+    if (!(Number(reg.precoLitro) > 0)) falta.push('precoLitro');
+    if (!(Number(reg.litros) > 0)) falta.push('litros');
+    if (!(Number(reg.valor) > 0)) falta.push('valor');
+    if (reg.hodometro == null || reg.hodometro === '') falta.push('hodometro');
+    if (!reg.formaPagamento) falta.push('formaPagamento');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(reg.data || ''))) falta.push('data');
+    return falta;
+  }
+  /** Os três valores não batem (com o total da bomba = valor pago + desconto)? */
+  function valoresNaoBatem(reg) {
+    const p = Number(reg.precoLitro), l = Number(reg.litros), t = Number(reg.valor) + (Number(reg.desconto) > 0 ? Number(reg.desconto) : 0);
+    if (!(p > 0 && l > 0 && t > 0)) return false;
+    return Math.abs(t - Math.round(p * l * 100) / 100) > 0.05 + 0.0005 * (l + p);
   }
 
   /**
@@ -523,7 +551,12 @@ const Sync = (() => {
     atual.resumoLeitura = resumoDaLeitura(resp);
     atual.lerVoz = false;
     atual.lerNota = false;
-    atual.status = 'revisar';
+    // V11: revisar só quando falta algo ou a leitura ficou em dúvida
+    const duvida = resp.duvida !== undefined ? !!resp.duvida || !!(resp.falhas && resp.falhas.length)
+      : !!(resp.aviso || resp.observacao || (resp.falhas && resp.falhas.length)); // servidor antigo: qualquer aviso
+    const revisar = duvida || valoresNaoBatem(atual) || (atual.tipo === 'abastecimento' && faltaNoAbastecimento(atual).length > 0);
+    atual.status = revisar ? 'revisar' : 'confirmado';
+    atual.autoIA = !revisar; // fica só neste celular: mostra o selo "✨ IA" até a pessoa abrir e salvar
     atual.alteradoEm = Date.now();
     atual.sync = 'pendente';
     await Banco.gravar('registros', atual);
@@ -863,6 +896,7 @@ const Sync = (() => {
   return {
     sincronizar, conexao, pendentes, apagarLocal, apagarVeiculoLocal, estaRodando: () => rodando, calcularTerceiro,
     // usados pelo formulário do abastecimento ("Lançar por voz" e "Ler nota do posto" na hora)
-    lerNotaPosto, blobParaBase64, avisosDaLeitura, lerAbastecimento, resumoDaLeitura
+    lerNotaPosto, blobParaBase64, avisosDaLeitura, lerAbastecimento, resumoDaLeitura,
+    faltaNoAbastecimento, valoresNaoBatem // V11
   };
 })();

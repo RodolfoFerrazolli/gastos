@@ -80,6 +80,80 @@ const Relatorio = (() => {
    *   litros colocados depois do primeiro) e a lista "Média aproximada por mês" (cada abastecimento com
    *   hodômetro vale até o próximo com hodômetro e conta no mês em que foi feito).
    */
+  // ------------------------------------------------------------------
+  //  V11: consumo a cada ~1.000 km e o aviso de "consumo caindo".
+  //  Conta aproximada: os litros colocados num abastecimento (e nos sem km logo depois) ÷ os km até o próximo
+  //  abastecimento com hodômetro. Os trechos são juntados de trás para a frente em blocos de pelo menos 1.000 km
+  //  (o bloco mais recente fica sempre completo; a sobra mais antiga, com menos de 1.000 km, fica de fora).
+  //  Aviso: o último bloco ficou 15% ou mais abaixo da média de antes (com pelo menos ~3.000 km de antes).
+  // ------------------------------------------------------------------
+  const BLOCO_KM = 1000;
+  const QUEDA_BLOCO = 0.85;
+  const HISTORICO_MIN = 3000;
+  function trechosAprox(abast) {
+    const comKm = [];
+    abast.forEach((r, i) => { if (temKm(r)) comKm.push(i); });
+    const trechos = [];
+    for (let k = 0; k < comKm.length - 1; k++) {
+      const i = comKm[k];
+      const j = comKm[k + 1];
+      const L = abast.slice(i, j).reduce((s, r) => s + litros(r), 0);
+      const dist = Number(abast[j].hodometro) - Number(abast[i].hodometro);
+      if (L > 0 && dist > 0) trechos.push({ de: abast[i].data, ate: abast[j].data, km: dist, litros: L });
+    }
+    return trechos;
+  }
+  function blocosDeConsumo(abast) {
+    const trechos = trechosAprox(abast);
+    const blocos = [];
+    let b = null;
+    for (let k = trechos.length - 1; k >= 0; k--) {
+      const t = trechos[k];
+      if (!b) b = { ate: t.ate, km: 0, litros: 0 };
+      b.km += t.km; b.litros += t.litros; b.de = t.de;
+      if (b.km >= BLOCO_KM) { blocos.unshift(b); b = null; }
+    }
+    blocos.forEach((x) => { x.kml = x.km / x.litros; });
+    // cada bloco comparado com a média dos de antes dele (quando já há histórico)
+    let km = 0;
+    let L = 0;
+    blocos.forEach((x) => {
+      x.antes = km >= HISTORICO_MIN ? km / L : null;
+      x.baixo = x.antes != null && x.kml <= x.antes * QUEDA_BLOCO;
+      km += x.km; L += x.litros;
+    });
+    return blocos;
+  }
+  /** Aviso do último bloco (null: sem aviso). */
+  function quedaDosBlocos(blocos) {
+    const u = blocos[blocos.length - 1];
+    if (!u || !u.baixo) return null;
+    return { pct: Math.round((1 - u.kml / u.antes) * 100), agora: u.kml, antes: u.antes, km: u.km, de: u.de, ate: u.ate };
+  }
+  function abastOrdenados(regs) {
+    return regs.filter(r => r.tipo === 'abastecimento' && !r.excluirPendente && r.status !== 'aguardando_ia').sort(ordem);
+  }
+  /**
+   * V11: cartão da tela do veículo. fechadoAte = data do último bloco quando a pessoa tocou no ✕:
+   * o aviso só volta se o consumo melhorou depois disso (algum abastecimento sem aviso) e caiu de novo.
+   */
+  function avisoConsumo(regs, fechadoAte) {
+    const abast = abastOrdenados(regs);
+    const blocos = blocosDeConsumo(abast);
+    const queda = quedaDosBlocos(blocos);
+    if (!queda) return null;
+    if (fechadoAte) {
+      let melhorou = false;
+      const depois = abast.filter(r => r.data > fechadoAte && temKm(r));
+      for (const r of depois) {
+        const ate = abast.filter(x => x.data < r.data || (x.data === r.data && Number(x.hodometro || 0) <= Number(r.hodometro)));
+        if (!quedaDosBlocos(blocosDeConsumo(ate))) { melhorou = true; break; }
+      }
+      if (!melhorou) return null;
+    }
+    return Object.assign(queda, { mini: blocos.slice(-7).map(b => ({ kml: b.kml, baixo: b === blocos[blocos.length - 1] })) });
+  }
+
   function calcularDesempenho(regs, de, ate) {
     const periodo = noPeriodo(regs, de, ate);
     const abast = periodo.filter(r => r.tipo === 'abastecimento').sort(ordem);
@@ -195,7 +269,7 @@ const Relatorio = (() => {
     }
 
     // ---- gráfico "Consumo de cada tanque" e o aviso de queda ----
-    res.barras = tanques.slice(-8).map((t, i, arr) => {
+    res.barras = tanques.map((t, i, arr) => { // V11: todos os tanques (o gráfico rola para o lado)
       const outrosT = tanques.filter(x => x !== t);
       const media = outrosT.length ? outrosT.reduce((s, x) => s + x.km, 0) / outrosT.reduce((s, x) => s + x.litros, 0) : t.kml;
       return { kml: t.kml, data: t.ate, baixo: tanques.length >= 2 && t.kml < media * QUEDA, ultimo: i === arr.length - 1 };
@@ -208,6 +282,11 @@ const Relatorio = (() => {
     } else {
       res.queda = null;
     }
+    // V11: consumo a cada ~1.000 km
+    res.blocos = blocosDeConsumo(abast);
+    const kmB = res.blocos.reduce((s, b) => s + b.km, 0);
+    res.mediaBlocos = kmB > 0 ? kmB / res.blocos.reduce((s, b) => s + b.litros, 0) : null;
+    res.quedaBlocos = quedaDosBlocos(res.blocos);
     return res;
   }
 
@@ -222,11 +301,29 @@ const Relatorio = (() => {
   const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
   function dataLonga(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : ''; }
   function linhasTexto(t) { return String(t || '').split('\n').map(s => s.trim()).filter(Boolean).join(' · '); }
+  /** V11: "4 × Óleo (R$ 42,90) = R$ 171,60; Filtro de óleo = R$ 38,00". */
+  function textoItensMan(r) {
+    return (r.itens || []).filter(i => i && i.nome).map((i) => {
+      const q = Number(i.qtd) || 1;
+      return (q !== 1 ? String(q).replace('.', ',') + ' × ' : '') + i.nome + (q !== 1 && i.unitario != null ? ` (${brl(i.unitario)})` : '') +
+        (i.valor != null ? ' = ' + brl(i.valor) : '');
+    }).join('; ');
+  }
+  function nomeManutencaoRel(r) {
+    if (r.descricao) return String(r.descricao).split('\n')[0].trim();
+    const it = (r.itens || []).filter(i => i && i.nome);
+    if (!it.length) return 'Manutenção';
+    return it[0].nome + (it.length > 1 ? ` e mais ${it.length - 1} ${it.length - 1 === 1 ? 'item' : 'itens'}` : '');
+  }
   function descricaoPlanilha(r) {
     const nome = NOME_PLANILHA[r.tipo] || 'Outros';
     if (r.tipo === 'abastecimento') {
-      return [r.combustivel, litros(r) ? num(r.litros, 3) + (r.combustivel === 'GNV' ? ' m³' : ' L') : '', r.tanqueCheio ? 'tanque cheio' : '']
+      return [r.combustivel, litros(r) ? num(r.litros, 3) + (r.combustivel === 'GNV' ? ' m³' : ' L') : '', r.tanqueCheio ? 'tanque cheio' : '',
+        Number(r.desconto) > 0 ? 'desconto ' + brl(r.desconto) : ''] // V11
         .filter(Boolean).join(' · ') || nome;
+    }
+    if (r.tipo === 'manutencao' && (r.itens || []).length) { // V11: o nome e os itens
+      return [r.descricao ? linhasTexto(r.descricao) : '', textoItensMan(r)].filter(Boolean).join(' · ');
     }
     if (r.tipo === 'seguro') {
       return [r.seguradora || 'Seguro', r.apolice ? 'apólice ' + r.apolice : '', r.validade ? 'validade ' + dataLonga(r.validade) : '', linhasTexto(r.descricao)]
@@ -359,7 +456,7 @@ const Relatorio = (() => {
   // ------------------------------------------------------------------
   //  Telas
   // ------------------------------------------------------------------
-  const R = { veiculoId: null, de: '', ate: '', aba: 'lista', abertos: new Set(), regs: [] };
+  const R = { veiculoId: null, de: '', ate: '', aba: 'lista', abertos: new Set(), regs: [], ordem: 'recentes' };
 
   function limpar() {
     R.veiculoId = null; R.de = ''; R.ate = ''; R.aba = 'lista'; R.abertos = new Set(); R.assinatura = '';
@@ -370,7 +467,7 @@ const Relatorio = (() => {
   function assinatura(regs) {
     const n = (x) => (x == null || x === '' ? null : Number(x));
     return JSON.stringify(regs.map(r => [r.id, r.tipo, r.data || '', n(r.valor), n(r.litros), n(r.precoLitro), n(r.hodometro), !!r.tanqueCheio,
-      r.combustivel || '', r.descricao || '', !!r.excluirPendente])
+      r.combustivel || '', r.descricao || '', !!r.excluirPendente, n(r.desconto), JSON.stringify(r.itens || [])])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
   }
   async function prepararVeiculo(dados) {
@@ -450,7 +547,7 @@ const Relatorio = (() => {
           `<span>${litros(r) ? num(r.litros, 3) + ' L' : '—'}</span><b>${brl(valor(r))}</b></div>`);
       html += grupo('manut', '🔧 Manutenções', g.manutencoes,
         '<div class="lin4 cab"><span>Data</span><span>Descrição</span><span>Km</span><span>Total</span></div>',
-        r => `<div class="lin4"><span>${dataAA(r.data)}</span><span class="quebra">${esc(String(r.descricao || 'Manutenção').split('\n')[0])}</span>` +
+        r => `<div class="lin4"><span>${dataAA(r.data)}</span><span class="quebra">${esc(nomeManutencaoRel(r))}</span>` +
           `<span>${temKm(r) ? km(r.hodometro) : '—'}</span><b>${brl(valor(r))}</b></div>`);
       html += grupo('desp', '🧾 Despesas', g.despesas,
         '<div class="lin3 cab"><span>Data</span><span>Tipo</span><span>Total</span></div>',
@@ -481,7 +578,10 @@ const Relatorio = (() => {
     const v = await prepararVeiculo(dados);
     if (!v) return false;
     $('rd-sub').textContent = subtitulo(v);
+    const ordemSalva = await Banco.lerConfig('ordemDesempenho', 'recentes');
+    if (ordemSalva !== R.ordem) { R.ordem = ordemSalva; R.mudou = true; }
     if (R.mudou || !$('rd-corpo').innerHTML) desenharDesempenho();
+    else rolarGraficosAoFim();
     return true;
   }
   function linhaDetalhe(r) {
@@ -510,8 +610,8 @@ const Relatorio = (() => {
       html += '<div class="grupo"><div class="grupo-titulo">⛽ Combustível</div>' +
         `<div class="lin2"><span>Litros abastecidos</span><b>${num(c.litros, 1)} L</b></div>` +
         `<div class="lin2"><span>Preço médio pago</span><b>${c.precoMedio != null ? brl(c.precoMedio) + '/L' : '—'}</b></div>` +
-        (c.barato ? `<div class="lin2"><span>Mais barato</span><b>${brl(c.barato.precoLitro)}/L · ${dataDM(c.barato.data)}</b></div>` : '') +
-        (c.caro ? `<div class="lin2"><span>Mais caro</span><b>${brl(c.caro.precoLitro)}/L · ${dataDM(c.caro.data)}</b></div>` : '') + '</div>';
+        (c.barato ? `<div class="lin2"><span>Mais barato</span><b>${brl(c.barato.precoLitro)}/L · ${dataAA(c.barato.data)}</b></div>` : '') +
+        (c.caro ? `<div class="lin2"><span>Mais caro</span><b>${brl(c.caro.precoLitro)}/L · ${dataAA(c.caro.data)}</b></div>` : '') + '</div>';
     }
     if (d.etanolGasolina) {
       const eg = d.etanolGasolina;
@@ -527,16 +627,33 @@ const Relatorio = (() => {
         `<div class="lin3"><span>Etanol</span><span>${pre}${num(eg.etanol.kml, 1)} km/L</span><b>${custo(eg.etanol)}</b></div>` +
         `<div class="lin3"><span>Gasolina</span><span>${pre}${num(eg.gasolina.kml, 1)} km/L</span><b>${custo(eg.gasolina)}</b></div>` + conclusao + '</div>';
     }
+    if (d.blocos.length >= 2) { // V11: consumo a cada ~1.000 km (valores dentro das barras e a linha da média)
+      const maior = Math.max(...d.blocos.map(b => b.kml));
+      const alt = Math.round(d.mediaBlocos / maior * 100);
+      const q = d.quedaBlocos;
+      html += '<div class="grupo"><div class="grupo-titulo">Consumo a cada ~1.000 km <span class="selo aguardando">aproximado</span></div>' +
+        '<div class="rolar-graf"><div class="colunas largas">' +
+        d.blocos.map(b => `<div class="col"><div class="c${b.baixo ? ' baixo' : ''}" style="height:${Math.max(24, Math.round(b.kml / maior * 100))}px">` +
+          `<span class="vin">${num(b.kml, 1)}</span></div><span class="d">${dataAA(b.ate)}</span></div>`).join('') +
+        `<div class="linha-media" style="bottom:${alt + 19}px"></div></div></div>` +
+        `<div class="legenda-media"><span class="tracejado"></span> média: ${num(d.mediaBlocos, 1)} km/L</div>` +
+        (q ? `<div class="aviso-rel">⚠️ Nos últimos ${km(q.km)} o consumo caiu ${q.pct}%: ${num(q.agora, 1)} km/L (antes fazia ${num(q.antes, 1)} km/L).</div>` : '') +
+        '<div class="como-calc">Conta aproximada: os litros que você colocou ÷ os km rodados até o abastecimento seguinte, em blocos de uns 1.000 km. ' +
+        'Como o tanque nem sempre é completado, o aviso só aparece quando a queda passa de 15%: assim não dá alarme falso.</div></div>';
+    }
     if (d.barras.length) {
       const maior = Math.max(...d.barras.map(b => b.kml));
-      html += '<div class="grupo"><div class="grupo-titulo">Consumo de cada tanque</div><div class="colunas">' +
+      html += '<div class="grupo"><div class="grupo-titulo">Consumo de cada tanque</div><div class="rolar-graf"><div class="colunas largas">' +
         d.barras.map(b => `<div class="col"><span class="v">${num(b.kml, 1)}</span><div class="c${b.baixo ? ' baixo' : ''}" style="height:${Math.max(6, Math.round(b.kml / maior * 100))}px"></div>` +
-          `<span class="d">${dataDM(b.data)}</span></div>`).join('') + '</div>' +
+          `<span class="d">${dataAA(b.data)}</span></div>`).join('') + '</div></div>' +
         (d.queda ? `<div class="aviso-rel">⚠️ No último tanque o consumo caiu ${d.queda.pct}% (${num(d.queda.kml, 1)} km/L).</div>` : '') + '</div>';
     }
     if (d.tanques.length) {
-      html += '<div class="grupo"><div class="grupo-titulo">Média por tanque(s)</div>';
-      d.tanques.forEach((t, i) => {
+      html += `<div class="grupo"><div class="grupo-titulo">Média por tanque(s) ${botaoOrdem()}</div>`;
+      const abertoT = d.tanqueAberto ? `<div class="tanque em-aberto"><div><div class="tq-datas">Desde ${dataAA(d.tanqueAberto.desde)}</div>` +
+        `<div class="tq-meta">${plural(d.tanqueAberto.n, '1 abastecimento', '# abastecimentos')} · fecha no próximo tanque cheio</div></div><div class="tq-kml">—</div></div>` : '';
+      if (R.ordem !== 'antigos') html += abertoT; // o que ainda está aberto é o mais recente
+      emOrdem(d.tanques.map((t, i) => [t, i])).forEach(([t, i]) => {
         const chave = 't' + i + '|' + t.de + '|' + t.ate;
         const podeAbrir = t.n > 1;
         const aberto = podeAbrir && R.abertos.has(chave);
@@ -549,14 +666,15 @@ const Relatorio = (() => {
             t.itens.map(linhaDetalhe).join('') + '<div class="det-tag">⛽ tanque cheio</div></div>';
         }
       });
-      if (d.tanqueAberto) {
-        html += `<div class="tanque em-aberto"><div><div class="tq-datas">Desde ${dataAA(d.tanqueAberto.desde)}</div>` +
-          `<div class="tq-meta">${plural(d.tanqueAberto.n, '1 abastecimento', '# abastecimentos')} · fecha no próximo tanque cheio</div></div><div class="tq-kml">—</div></div>`;
-      }
+      if (R.ordem === 'antigos') html += abertoT;
       html += '</div>';
     } else if (!d.semDados && (d.meses.length || d.mesAberto)) {
-      html += '<div class="grupo"><div class="grupo-titulo">Média aproximada por mês</div>';
-      d.meses.forEach((m) => {
+      html += `<div class="grupo"><div class="grupo-titulo">Média aproximada por mês ${botaoOrdem()}</div>`;
+      const a = d.mesAberto;
+      const abertoM = a ? `<div class="tanque em-aberto"><div><div class="tq-datas">${a.juntoDeOutro ? 'Desde ' + dataAA(a.desde) : mesLongo(a.mes)}</div>` +
+        `<div class="tq-meta">${num(a.litros, 1)} L · ${plural(a.n, '1 abastecimento', '# abastecimentos')} · fecha no próximo abastecimento</div></div><div class="tq-kml">—</div></div>` : '';
+      if (R.ordem !== 'antigos') html += abertoM;
+      emOrdem(d.meses).forEach((m) => {
         const chave = 'm' + m.mes;
         const aberto = R.abertos.has(chave);
         html += `<div class="tanque abre${aberto ? ' aberto' : ''}" data-abrir="${chave}" role="button"><div><div class="tq-datas">${mesLongo(m.mes)}</div>` +
@@ -564,17 +682,25 @@ const Relatorio = (() => {
           `<div class="tq-kml">≈ ${num(m.kml, 1)} <small>km/L</small> <span class="setinha">${aberto ? '▲' : '▼'}</span></div></div>`;
         if (aberto) html += '<div class="tq-detalhe">' + CAB_DETALHE + m.itens.map(linhaDetalhe).join('') + '</div>';
       });
-      const a = d.mesAberto;
-      if (a) {
-        const titulo = a.juntoDeOutro ? 'Desde ' + dataAA(a.desde) : mesLongo(a.mes);
-        html += `<div class="tanque em-aberto"><div><div class="tq-datas">${titulo}</div>` +
-          `<div class="tq-meta">${num(a.litros, 1)} L · ${plural(a.n, '1 abastecimento', '# abastecimentos')} · fecha no próximo abastecimento</div></div><div class="tq-kml">—</div></div>`;
-      }
+      if (R.ordem === 'antigos') html += abertoM;
       html += '</div>';
     }
     corpo.innerHTML = html;
     preencherPeriodo('rd');
+    rolarGraficosAoFim();
   }
+  // V11: os gráficos abrem no mais recente (à direita); a pessoa arrasta para ver os de antes
+  function rolarGraficosAoFim() {
+    const ir = () => document.querySelectorAll('#rd-corpo .rolar-graf').forEach((x) => { x.scrollLeft = x.scrollWidth; });
+    ir();
+    requestAnimationFrame(ir);
+    setTimeout(ir, 120);
+  }
+  // V11: ordem das listas (⇅), lembrada
+  function botaoOrdem() {
+    return `<button class="ordem-btn" type="button" data-ordem>⇅ ${R.ordem === 'antigos' ? 'Mais antigos primeiro' : 'Mais recentes primeiro'}</button>`;
+  }
+  function emOrdem(lista) { return R.ordem === 'antigos' ? lista : lista.slice().reverse(); }
 
   /** Telas do relatório: devolve false se o veículo não existe mais. */
   async function preparar(tela, dados) {
@@ -627,6 +753,14 @@ const Relatorio = (() => {
     rd.addEventListener('click', (e) => {
       const b = e.target.closest('button.campo-data');
       if (b) { U().abrirCalendario(b); return; }
+      if (e.target.closest('[data-ordem]')) { // V11: ⇅ inverte a ordem e lembra
+        R.ordem = R.ordem === 'antigos' ? 'recentes' : 'antigos';
+        Banco.gravarConfig('ordemDesempenho', R.ordem);
+        const y = window.scrollY;
+        desenharDesempenho();
+        window.scrollTo(0, y);
+        return;
+      }
       const t = e.target.closest('[data-abrir]');
       if (!t) return;
       if (R.abertos.has(t.dataset.abrir)) R.abertos.delete(t.dataset.abrir); else R.abertos.add(t.dataset.abrir);
@@ -642,8 +776,8 @@ const Relatorio = (() => {
   return {
     preparar, limpar, abaAtual: () => R.aba,
     periodoAtual: () => (R.de ? { de: R.de, ate: R.ate } : null),
-    dadosPlanilha, mesesEntre,
+    dadosPlanilha, mesesEntre, avisoConsumo, // V11
     // usados nos testes
-    calcularGastos, calcularDesempenho, periodoPadrao
+    calcularGastos, calcularDesempenho, periodoPadrao, blocosDeConsumo
   };
 })();

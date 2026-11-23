@@ -23,6 +23,16 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 11', itens: [
+      '🔧 <b>Manutenção com itens:</b> o botão agora é <b>+ Adicionar manutenção</b>. Dê um nome (opcional) e lance cada serviço ou peça com <b>quantidade × valor de cada</b>. O total vai somando sozinho; se teve desconto, é só mudar o total.',
+      '🏷️ <b>Desconto no abastecimento:</b> toque em <b>Teve desconto?</b> e digite o desconto (de app do posto, por exemplo). O app mostra o total da bomba, o desconto, o <b>valor pago</b> e quanto o litro saiu. Pela foto, o desconto da nota já vem preenchido.',
+      '⛽ <b>Combustível certo pela foto da bomba:</b> o app divide o total pelos litros e confere com os preços da bomba para saber qual combustível foi. Os valores que valem são os da bomba.',
+      '✨ <b>Menos Revisar:</b> o que a IA leu inteiro entra direto, com o selo <b>✨ IA</b>. Só vai para <b>Revisar</b> quando falta alguma coisa ou há dúvida, e o que falta aparece marcado em laranja.',
+      '📉 <b>Consumo caindo:</b> se o consumo do veículo cair bastante (15% ou mais), aparece um aviso na tela do veículo. No <b>Desempenho</b> tem o gráfico <b>Consumo a cada ~1.000 km</b>, os gráficos mostram todos os tanques (arraste para o lado) com o ano nas datas, e as listas têm o botão <b>⇅</b> para mudar a ordem.',
+      '📍 <b>Mapa:</b> o lançamento pela foto da nota abre no endereço da nota.',
+      '👆 <b>Segurar um ícone</b> mostra o nome dele. E ao voltar para uma lista, ela fica onde você estava.',
+      '🛠️ Correções: as miniaturas das fotos na tela de ver, o aviso "km fora de ordem" em dois abastecimentos no mesmo dia e o aviso de pedido resolvido mostrando o texto inteiro.'
+    ] },
     { titulo: 'Versão 10', itens: [
       '🧾 <b>Tela inicial:</b> o cartão Lançamentos mostra <b>quanto você gastou neste mês</b> e o último lançamento. Para lançar, entre em <b>Lançamentos</b> e toque no <b>+</b> (Lançar por voz, por foto ou por texto).',
       '👀 <b>Ver antes de editar:</b> tocar num lançamento, num gasto do veículo ou numa despesa do grupo agora só <b>mostra</b> tudo. Para mudar, toque no lápis ✏️ lá em cima.',
@@ -493,14 +503,48 @@
   function estadoTela() {
     return dadosTela ? { tela: telaAtual, dados: dadosTela } : { tela: telaAtual };
   }
+  /**
+   * V11: voltar para uma lista volta no mesmo lugar. Ao abrir uma tela nova, a posição da tela de baixo fica guardada
+   * no histórico; ao voltar, a tela é desenhada e a posição volta (espera a lista aparecer; para se a pessoa mexer).
+   */
+  let rolagemPendente = null;
+  function restaurarRolagem(y) {
+    const marca = {};
+    rolagemPendente = marca;
+    const fim = Date.now() + 1500;
+    let certo = 0;
+    const passo = () => {
+      if (rolagemPendente !== marca) return;
+      if (Math.abs(window.scrollY - y) > 2) { window.scrollTo(0, y); certo = 0; } else certo++;
+      if (certo < 6 && Date.now() < fim) setTimeout(passo, 50); else rolagemPendente = null;
+    };
+    passo();
+  }
+  ['touchstart', 'wheel', 'keydown'].forEach(ev => window.addEventListener(ev, () => { rolagemPendente = null; }, { passive: true }));
   function mostrarTela(nome, { empilhar = true, dados = null } = {}) {
+    const yAntes = window.scrollY;
     document.querySelectorAll('.tela').forEach(t => t.classList.add('oculto'));
     $('tela-' + nome).classList.remove('oculto');
     telaAtual = nome;
     dadosTela = dados;
     document.body.classList.toggle('tem-fab', nome === 'veiculo' || nome === 'lancamentos'); // o aviso (toast) sobe acima do "+"
-    window.scrollTo(0, 0);
-    if (empilhar) { const estado = estadoTela(); quandoHistoricoPronto(() => history.pushState(estado, '')); }
+    rolagemPendente = null;
+    const st = history.state;
+    if (!empilhar && st && st.tela === nome && st.rolagem > 0) {
+      const y = st.rolagem;
+      try { const n = Object.assign({}, st); delete n.rolagem; history.replaceState(n, ''); } catch (e) { /* segue */ }
+      window.scrollTo(0, 0);
+      restaurarRolagem(y);
+    } else {
+      window.scrollTo(0, 0);
+    }
+    if (empilhar) {
+      const estado = estadoTela();
+      quandoHistoricoPronto(() => {
+        try { if (history.state && history.state.tela) history.replaceState(Object.assign({}, history.state, { rolagem: yAntes }), ''); } catch (e) { /* segue */ }
+        history.pushState(estado, '');
+      });
+    }
   }
   async function podeSairDaTela() {
     if (telaAtual === 'form' && Form.alterado) {
@@ -1001,6 +1045,42 @@
     const d = new Date(ms);
     return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
   }
+  /** V11: o que falta num lançamento (campos do formulário: valor, descrição, categoria e forma de pagamento). */
+  function faltaNoLancamento(l) {
+    const falta = [];
+    if (!(Number(l.valorTotal) > 0)) falta.push('valor');
+    if (!String(l.descricao || '').trim() && !(l.itens || []).length) falta.push('descricao');
+    if (!l.categoria) falta.push('categoria');
+    if (!l.meioPagamento) falta.push('meio');
+    return falta;
+  }
+  const CAMPO_FALTA_L = { valor: 'f-valor', descricao: 'f-desc', categoria: 'f-cat', meio: 'f-meio' };
+  const NOME_FALTA_L = { valor: 'o valor', descricao: 'a descrição', categoria: 'a categoria', meio: 'a forma de pagamento' };
+  /** V11: no "Revisar", o que falta fica marcado (só ali). */
+  function marcarFaltandoLanc() {
+    if (!$('f-valor')) return;
+    if (Form.modo !== 'revisar') { // fora do Revisar não marca nada (limpa o que tiver ficado)
+      document.querySelectorAll('#tela-form .falta').forEach(e => e.classList.remove('falta'));
+      document.querySelectorAll('#tela-form .falta-txt').forEach(e => e.remove());
+      return;
+    }
+    const x = { valorTotal: lerValor($('f-valor').value), descricao: $('f-desc').value, itens: lerItensForm(), categoria: $('f-cat').value, meioPagamento: $('f-meio').value };
+    const falta = faltaNoLancamento(x);
+    Object.keys(CAMPO_FALTA_L).forEach((k) => {
+      const el = $(CAMPO_FALTA_L[k]);
+      const marcar = falta.includes(k);
+      el.classList.toggle('falta', marcar);
+      const ao = el.nextElementSibling && el.nextElementSibling.classList.contains('falta-txt') ? el.nextElementSibling : null;
+      if (marcar && !ao) el.insertAdjacentHTML('afterend', '<small class="falta-txt">⚠️ Falta preencher</small>');
+      if (!marcar && ao) ao.remove();
+    });
+    const resumo = $('f-falta-resumo');
+    if (resumo) {
+      const nomes = falta.map(k => NOME_FALTA_L[k]);
+      resumo.innerHTML = nomes.length ? `<b>Falta ${nomes.length === 1 ? '1 coisa' : nomes.length + ' coisas'}:</b> ` +
+        esc(nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0]) + '.' : '';
+    }
+  }
   function cartao(l, anexos) {
     const fotos = anexos.filter(a => a.tipo === 'foto').length;
     const temAudio = l.origem === 'voz';
@@ -1008,7 +1088,13 @@
     const desc = descricaoLanc(l);
     const meta = [hora(l.dataHora), l.categoria, l.meioPagamento].filter(Boolean).join(' · ');
     const selos = [];
-    if (l.status === 'revisar') selos.push('<span class="selo revisar">Revisar</span>');
+    if (l.status === 'revisar') {
+      const falta = faltaNoLancamento(l).length; // V11
+      selos.push(`<span class="selo revisar">Revisar${falta ? ' · falta ' + falta : ''}</span>`);
+    }
+    if (l.status === 'confirmado' && /^(IA|SEFAZ)$/.test(l.alteradoPor || '') && (l.origem === 'voz' || l.origem === 'foto')) {
+      selos.push('<span class="selo ia" title="Lido pela IA, sem faltar nada">✨ IA</span>'); // V11: entrou direto, sem revisar
+    }
     if (l.status === 'aguardando_ia') selos.push(`<span class="selo aguardando">${nota ? 'Aguardando leitura' : 'Aguardando IA'}</span>`);
     if (l.status === 'erro_ia') selos.push('<span class="selo erro">Preencher</span>');
     if (l.sync === 'pendente' || anexos.some(a => !a.enviado && a.blob)) selos.push('<span class="selo fila">Na fila</span>');
@@ -1298,17 +1384,50 @@
     clearTimeout(dicaRelogio);
     dicaRelogio = setTimeout(() => el.classList.add('oculto'), 3000);
   }
+  /**
+   * V11: tocar e segurar qualquer botão que é só um ícone (⚙️, ✏️, ←, 🐞, ✕...) mostra o nome dele.
+   * O nome vem de data-dica, aria-label ou title.
+   */
+  function nomeDoIcone(el) {
+    if (!el || el.disabled) return '';
+    const nome = el.dataset.dica || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (!nome) return '';
+    const txt = (el.textContent || '').replace(/\s+/g, '');
+    const soIcone = el.classList.contains('botao-icone') || !/[A-Za-zÀ-ÿ0-9]{2}/.test(txt);
+    return soIcone ? nome : '';
+  }
+  (function dicasDosIcones() {
+    let relogio = null, alvo = null, segurado = null, x0 = 0, y0 = 0;
+    const parar = () => { clearTimeout(relogio); relogio = null; };
+    document.addEventListener('pointerdown', (e) => {
+      parar(); segurado = null;
+      const b = e.target.closest && e.target.closest('button, [role="button"]');
+      const nome = nomeDoIcone(b);
+      if (!nome) return;
+      alvo = b; x0 = e.clientX; y0 = e.clientY;
+      relogio = setTimeout(() => { segurado = b; mostrarDica(b, nome); }, 500);
+    }, true);
+    document.addEventListener('pointermove', (e) => { if (relogio && Math.hypot(e.clientX - x0, e.clientY - y0) > 12) parar(); }, true);
+    ['pointerup', 'pointercancel'].forEach(ev => document.addEventListener(ev, parar, true));
+    // no Android, segurar o dedo gera este evento: vale como "tocar e segurar"
+    document.addEventListener('contextmenu', (e) => {
+      const b = e.target.closest && e.target.closest('button, [role="button"]');
+      const nome = nomeDoIcone(b);
+      if (!nome) return;
+      e.preventDefault();
+      if (segurado !== b) { parar(); segurado = b; mostrarDica(b, nome); }
+    }, true);
+    // depois de segurar, soltar o dedo não vale como toque no botão
+    document.addEventListener('click', (e) => {
+      if (!segurado) return;
+      const b = e.target.closest && e.target.closest('button, [role="button"]');
+      if (b === segurado) { e.stopImmediatePropagation(); e.preventDefault(); }
+      segurado = null;
+    }, true);
+  })();
   function dicaAoSegurar(botao, texto) {
     if (!botao) return;
-    let relogio = null;
-    let segurou = false;
-    const mostrar = () => { segurou = true; mostrarDica(botao, texto); };
-    botao.addEventListener('pointerdown', () => { segurou = false; clearTimeout(relogio); relogio = setTimeout(mostrar, 500); });
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => botao.addEventListener(ev, () => clearTimeout(relogio)));
-    // no Android, segurar o dedo também gera este evento: vale como "tocar e segurar"
-    botao.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!segurou) { clearTimeout(relogio); mostrar(); } });
-    // depois de segurar, soltar o dedo não vale como toque no botão
-    botao.addEventListener('click', (e) => { if (segurou) { segurou = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    botao.dataset.dica = texto; // V11: quem mostra é o "dicasDosIcones" (vale para todos os ícones)
   }
   dicaAoSegurar($('ini-config'), 'Configurações');
   dicaAoSegurar($('vx-mais'), 'Adicionar um item');
@@ -1371,6 +1490,7 @@
     $('f-data').value = paraInputLocal(l.dataHora);
     $('f-desc').value = l.descricao || '';
     $('f-valor').value = l.valorTotal != null ? valorParaCampo(l.valorTotal) : '';
+    Form.totalAuto = l.valorTotal == null; // V11: total vazio = acompanha a soma dos itens até a pessoa digitar outro
     preencherSelect($('f-cat'), L.categorias, l.categoria, 'Escolha a categoria');
     preencherSelect($('f-meio'), L.meios, l.meioPagamento, 'Não informado');
     $('f-banco').value = l.banco || '';
@@ -1381,6 +1501,7 @@
     (l.itens || []).forEach(i => addItem(i));
     atualizarSoma();
     await renderCaixaIA();
+    marcarFaltandoLanc(); // V11
     await renderFotosForm();
     $('form-salvar').textContent = Form.modo === 'revisar' ? 'Confirmar' : 'Salvar';
     $('form-excluir').classList.toggle('oculto', Form.modo === 'novo');
@@ -1405,7 +1526,7 @@
       classe = 'laranja';
       msg = '<b>Aguardando a IA.</b> O áudio é interpretado quando for enviado (no Wi-Fi ou pelas setas lá em cima). Se preferir, preencha você mesmo: com valor e categoria preenchidos, o lançamento fica confirmado.';
     } else if (l.status === 'revisar') {
-      msg = '<b>A IA preencheu os campos abaixo.</b> Confira, corrija se precisar e toque em Confirmar.';
+      msg = '<b>A IA preencheu os campos abaixo.</b> Confira, corrija se precisar e toque em Confirmar.<div id="f-falta-resumo"></div>';
     } else if (l.status === 'erro_ia') {
       classe = 'vermelho';
       msg = '<b>A IA não conseguiu interpretar este áudio.</b> Ouça e preencha os campos abaixo.';
@@ -1441,7 +1562,7 @@
       classe = 'laranja';
       msg = '<b>Aguardando a leitura da nota.</b> Ela é lida quando for enviada (no Wi-Fi ou pelas setas lá em cima). Se preferir, preencha você mesmo: com valor e categoria preenchidos, o lançamento fica confirmado.';
     } else if (l.status === 'revisar') {
-      msg = `<b>Os dados vieram ${fonte || 'da nota'}.</b> Confira, corrija se precisar e toque em Confirmar.`;
+      msg = `<b>Os dados vieram ${fonte || 'da nota'}.</b> Confira, corrija se precisar e toque em Confirmar.<div id="f-falta-resumo"></div>`;
     } else if (l.status === 'erro_ia') {
       classe = 'vermelho';
       msg = '<b>Não foi possível ler esta nota.</b> Veja a foto abaixo e preencha os campos.';
@@ -1488,12 +1609,16 @@
       return item;
     }).filter(i => i.nome || i.valor != null);
   }
-  function atualizarSoma() {
+  function atualizarSoma(preencher = true) { // preencher=false: a pessoa está mexendo no total
     const it = lerItensForm();
-    const soma = it.reduce((s, i) => s + (i.valor || 0), 0);
-    $('f-soma').textContent = it.some(i => i.valor != null)
-      ? `Soma dos itens: ${brl(soma)}${$('f-valor').value.trim() ? '' : ' (será usada como total)'}`
-      : '';
+    const soma = Math.round(it.reduce((s, i) => s + (i.valor || 0), 0) * 100) / 100;
+    const temValor = it.some(i => i.valor != null);
+    // V11: o total vai sendo preenchido sozinho com a soma (itens negativos, como um desconto, entram na conta);
+    // se a pessoa digitar outro total, vale o dela
+    if (Form.totalAuto && preencher) $('f-valor').value = temValor ? valorParaCampo(soma) : '';
+    const igual = Math.abs((lerValor($('f-valor').value) || 0) - soma) < 0.005;
+    $('f-soma').textContent = !temValor ? '' : Form.totalAuto ? `Soma dos itens: ${brl(soma)} (o total acompanha a soma)`
+      : `Soma dos itens: ${brl(soma)}${igual ? '' : ' (o total foi mudado por você)'}`;
   }
   $('f-add-item').onclick = () => { addItem(); Form.alterado = true; };
   // pagamento em dinheiro: o dinheiro está com a pessoa, não tem banco/conta (o titular continua)
@@ -1508,10 +1633,10 @@
     b.placeholder = dinheiro ? 'Não se aplica (dinheiro)' : 'Ex.: Nubank';
   }
   $('f-meio').addEventListener('change', travarBanco);
-  $('f-valor').addEventListener('input', atualizarSoma);
+  $('f-valor').addEventListener('input', () => { Form.totalAuto = !$('f-valor').value.trim(); atualizarSoma(false); });
   // (escolher foto não conta como alteração sozinho: só se a pessoa usar a foto no recorte)
-  $('tela-form').addEventListener('input', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
-  $('tela-form').addEventListener('change', (e) => { if (e.target.type !== 'file') Form.alterado = true; });
+  $('tela-form').addEventListener('input', (e) => { if (e.target.type !== 'file') { Form.alterado = true; marcarFaltandoLanc(); } });
+  $('tela-form').addEventListener('change', (e) => { if (e.target.type !== 'file') { Form.alterado = true; marcarFaltandoLanc(); } });
 
   function miniatura(blob, chave) {
     const conteudo = blob ? `<img src="${urlDe(blob)}" alt="foto">` : '<div class="sem-arquivo">☁️ Foto guardada no servidor<b>Toque para ver</b></div>';
@@ -1657,6 +1782,7 @@
     });
     if (Form.modo === 'revisar' || (aguardandoIA && completo)) l.status = 'confirmado';
     if (Form.modo === 'novo' && Form.gps) Object.assign(l, Form.gps);
+    if (/^(IA|SEFAZ)$/.test(l.alteradoPor || '')) l.alteradoPor = ''; // V11: a pessoa conferiu: sai o "✨ IA"
     l.alteradoEm = Date.now();
     l.sync = 'pendente';
 
@@ -1666,7 +1792,7 @@
       // pega o estado mais recente salvo no aparelho (a sincronização pode ter atualizado algo)
       const salvo = await Banco.obter('lancamentos', l.id);
       if (salvo) {
-        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota'].forEach(k => {
+        ['versaoBase', 'tentouEnviar', 'endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota', 'enderecoDe'].forEach(k => {
           if (salvo[k] !== undefined) l[k] = salvo[k];
         });
       }
@@ -2394,12 +2520,21 @@
   }
   function linhaVer(rotulo, valor) { return valor ? `<div class="ver-lin"><span>${esc(rotulo)}</span><b>${esc(valor)}</b></div>` : ''; }
   /** Botão "Abrir no mapa": no Android abre a escolha de apps de mapa (geo:); no computador, o Google Maps. */
-  function mapaHtml(lat, lng, endereco, nome) {
-    const temGps = lat != null && lng != null && isFinite(lat) && isFinite(lng);
+  /**
+   * Caixa "Abrir no mapa". V11: "de" diz de onde veio o lugar: 'nota' (endereço da loja impresso na nota: vale mais que o GPS,
+   * que pode ser de onde a foto foi tirada), 'foto' (GPS de quando a foto foi tirada) ou '' (GPS ou o que foi escrito).
+   */
+  function mapaHtml(lat, lng, endereco, nome, de) {
+    let temGps = lat != null && lng != null && isFinite(lat) && isFinite(lng);
     if (!temGps && !endereco) return '';
+    const daNota = de === 'nota' && !!endereco;
+    if (daNota) temGps = false; // o mapa procura o endereço da nota
     const texto = endereco || 'Localização registrada pelo GPS';
-    return `<button class="ver-mapa" type="button" id="ver-mapa" data-lat="${temGps ? lat : ''}" data-lng="${temGps ? lng : ''}" data-end="${esc(endereco || '')}" data-nome="${esc(nome || '')}">` +
-      `<span class="ic" aria-hidden="true">📍</span><span class="tx"><b>${esc(texto)}</b><small>Abrir no mapa</small></span><span class="seta" aria-hidden="true">›</span></button>`;
+    const origem = daNota ? 'endereço da nota' : !temGps ? '' : de === 'foto' ? 'onde você estava quando tirou a foto (GPS)' : 'pelo GPS';
+    const busca = daNota && nome && endereco.toLowerCase().indexOf(String(nome).toLowerCase()) < 0 ? nome + ', ' + endereco : endereco;
+    return `<button class="ver-mapa" type="button" id="ver-mapa" data-lat="${temGps ? lat : ''}" data-lng="${temGps ? lng : ''}" data-end="${esc(busca || '')}" data-nome="${esc(nome || '')}">` +
+      `<span class="ic" aria-hidden="true">📍</span><span class="tx"><b>${esc(texto)}</b><small>Abrir no mapa${origem ? ` · <i>${esc(origem)}</i>` : ''}</small></span>` +
+      `<span class="seta" aria-hidden="true">›</span></button>`;
   }
   function linkDoMapa({ lat, lng, endereco, nome }) {
     const android = /Android/i.test(navigator.userAgent || '');
@@ -2428,8 +2563,16 @@
       return `<div class="mini" data-ver="${esc(a.id)}" role="button" aria-label="Ver a foto">${a.blob ? `<img src="${urlDe(a.blob)}" alt="foto">` : '☁️'}<small>${esc(r || (a.blob ? 'ver' : 'no servidor'))}</small></div>`;
     }).join('');
   }
+  /** V11: sem o "toque no lápis" (só fica o aviso de quando não dá para mudar). */
   function rodapeVer(podeEditar, texto) {
-    return `<div class="ver-rodape">${podeEditar ? 'Para mudar alguma coisa, toque no lápis ✏️ lá em cima.' : esc(texto || '')}</div>`;
+    return podeEditar || !texto ? '' : `<div class="ver-rodape">${esc(texto)}</div>`;
+  }
+  /** V11: de onde veio o endereço do lançamento ('nota', 'foto' = GPS de quando tirou a foto, ou ''). */
+  function deOndeEndereco(l) {
+    if (l.enderecoDe === 'nota') return 'nota';
+    const lida = l.origem === 'foto' && /ia|sefaz/.test(l.fonteDados || '');
+    if (!l.enderecoDe && lida && l.endereco) return 'nota'; // lançamentos de antes da v11: a nota quase sempre traz o endereço
+    return l.origem === 'foto' ? 'foto' : '';
   }
   async function htmlVerLancamento(id) {
     const l = await Banco.obter('lancamentos', id);
@@ -2442,7 +2585,7 @@
       `<div class="v">${l.valorTotal != null ? brl(l.valorTotal) : '—'}</div></div>` +
       '<div class="ver-caixa">' + linhaVer('Data e hora', dataTxt) + linhaVer('Categoria', l.categoria) + linhaVer('Pagamento', l.meioPagamento) +
       linhaVer('Banco / titular', banco) + linhaVer('Estabelecimento', l.estabelecimento) + '</div>' +
-      mapaHtml(l.lat, l.lng, l.endereco, l.estabelecimento || descricaoLanc(l));
+      mapaHtml(l.lat, l.lng, l.endereco, l.estabelecimento || descricaoLanc(l), deOndeEndereco(l));
     const itens = (l.itens || []).filter(i => i.nome || i.valor != null);
     if (itens.length) {
       const soma = itens.reduce((s2, i) => s2 + (Number(i.valor) || 0), 0);
@@ -2464,6 +2607,7 @@
   /** dados: { tipo: 'lanc' | 'reg' | 'gdesp', id } */
   async function abrirVer(dados, empilhar = true) {
     let r = null;
+    liberarUrls(); // V11: antes era chamado depois de montar a tela e as miniaturas apareciam quebradas
     try {
       if (dados.tipo === 'lanc') r = await htmlVerLancamento(dados.id);
       else if (dados.tipo === 'reg') r = await Veiculos.htmlVer(dados.id);
@@ -2474,7 +2618,6 @@
       if (!empilhar) quandoHistoricoPronto(() => { if (history.state && history.state.tela) history.back(); else exibirInicio(); });
       return false;
     }
-    liberarUrls();
     Ver.dados = dados;
     Ver.editar = r.editar;
     $('ver-titulo').textContent = r.titulo;
@@ -2514,7 +2657,7 @@
   function avisoPedidoHtml(p) {
     const feliz = p.situacao === 'Resolvido';
     const cab = `<div class="ap-pedido"><small>Pedido nº ${p.numero}${p.criadoEm ? ' · ' + dataCurta(p.criadoEm) : ''}${p.nomeTela ? ' · tela ' + esc(p.nomeTela) : ''}</small>` +
-      (p.texto ? `“${esc(p.texto.length > 160 ? p.texto.slice(0, 157) + '…' : p.texto)}”` : '') + '</div>';
+      (p.texto ? `<span class="ap-texto">“${esc(p.texto)}”</span>` : '') + '</div>'; // V11: o texto inteiro (rola se for grande)
     if (feliz) {
       return '<div class="fundo-dialogo"><div class="dialogo aviso-pedido feliz" role="dialog" aria-label="Pedido resolvido">' +
         '<svg class="ap-icone" viewBox="0 0 52 52" aria-hidden="true"><circle class="c" cx="26" cy="26" r="24"/><path class="v" d="M15 27 l7 7 l15 -16"/></svg>' +

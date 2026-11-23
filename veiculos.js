@@ -33,7 +33,7 @@ const Veiculos = (() => {
     'Bege', 'Marrom', 'Dourado', 'Rosa', 'Roxo'];
   const TIPOS = {
     abastecimento: { icone: '⛽', nome: 'Abastecimento', novo: 'Novo abastecimento', isto: 'este abastecimento', salvo: 'Abastecimento salvo', excluir: 'Excluir abastecimento' },
-    manutencao: { icone: '🔧', nome: 'Manutenção', lista: 'Manutenção', novo: 'Nova manutenção', isto: 'esta manutenção', salvo: 'Manutenção salva', excluir: 'Excluir manutenção', adicionar: '+ Adicionar item', vazio: 'Nenhuma manutenção lançada.' },
+    manutencao: { icone: '🔧', nome: 'Manutenção', lista: 'Manutenção', novo: 'Nova manutenção', isto: 'esta manutenção', salvo: 'Manutenção salva', excluir: 'Excluir manutenção', adicionar: '+ Adicionar manutenção', vazio: 'Nenhuma manutenção lançada.' },
     seguro: { icone: '🛡️', nome: 'Seguro', lista: 'Seguro', novo: 'Novo seguro', isto: 'este seguro', salvo: 'Seguro salvo', excluir: 'Excluir seguro', adicionar: '+ Adicionar seguro', vazio: 'Nenhum seguro lançado.' },
     ipva: { icone: '🏛️', nome: 'IPVA', lista: 'IPVA', novo: 'Pagamento do IPVA', isto: 'este pagamento do IPVA', salvo: 'Pagamento salvo', excluir: 'Excluir pagamento', adicionar: '+ Adicionar pagamento', vazio: 'Nenhum pagamento do IPVA lançado.' },
     licenciamento: { icone: '📄', nome: 'Licenciamento', lista: 'Licenciamento', novo: 'Pagamento do licenciamento', isto: 'este pagamento do licenciamento', salvo: 'Pagamento salvo', excluir: 'Excluir pagamento', adicionar: '+ Adicionar pagamento', vazio: 'Nenhum pagamento do licenciamento lançado.' },
@@ -116,6 +116,30 @@ const Veiculos = (() => {
       `(${d.dif > 0 ? 'sobram' : 'faltam'} ${brl(Math.abs(d.dif))}).`;
   }
   function primeiraLinha(t) { return String(t || '').split('\n')[0].trim(); }
+  const arred2 = (n) => Math.round(Number(n) * 100) / 100;
+  /** V11: total da bomba (litros × preço) = valor pago + desconto. */
+  function totalBomba(r) { return r.valor != null ? arred2(Number(r.valor) + (Number(r.desconto) > 0 ? Number(r.desconto) : 0)) : null; }
+  /** V11: nome da manutenção: o nome que a pessoa deu; sem nome, o 1º item "e mais N itens". */
+  function nomeManutencao(r) {
+    if (r.descricao) return primeiraLinha(r.descricao);
+    const it = (r.itens || []).filter(i => i && i.nome);
+    if (!it.length) return TIPOS.manutencao.nome;
+    return it[0].nome + (it.length > 1 ? ' e mais ' + App().plural(it.length - 1, '1 item', '# itens') : '');
+  }
+  /** V11: número digitado com vírgula (aceita negativo: um desconto como item). */
+  function lerNumBr(t, casas = 2) {
+    let x = String(t == null ? '' : t).trim().replace(/[R$\s]/g, '');
+    if (!x) return null;
+    if (x.includes(',')) x = x.replace(/\./g, '').replace(',', '.');
+    const n = Number(x);
+    const f = Math.pow(10, casas);
+    return isFinite(n) ? Math.round(n * f) / f : null;
+  }
+  function numParaCampo(v, casas = 2) {
+    if (v == null || isNaN(v)) return '';
+    const tres = casas > 2 && Math.abs(Math.round(v * 100) - v * 100) > 1e-6;
+    return Number(v).toFixed(tres ? 3 : 2).replace('.', ',');
+  }
   function semAcento(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
   function maiuscula(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   /** "ABC1D23" (Mercosul) ou "ABC-1234" (antiga); '' se não for placa. */
@@ -134,8 +158,12 @@ const Veiculos = (() => {
     return CORES.find(c => semAcento(c) === semAcento(t)) || (t ? maiuscula(t) : '');
   }
   /** Ordem dos gastos: pela data e, no mesmo dia, pela hora em que foram lançados. */
+  /** Ordem dos gastos: data; no mesmo dia (não há hora), o km do painel; depois, a ordem em que foram lançados (V11). */
   function compararData(a, b) {
-    return String(a.data || '').localeCompare(String(b.data || '')) || (a.criadoEm || 0) - (b.criadoEm || 0);
+    const d = String(a.data || '').localeCompare(String(b.data || ''));
+    if (d) return d;
+    if (a.hodometro != null && b.hodometro != null && a.hodometro !== b.hodometro) return a.hodometro - b.hodometro;
+    return (a.criadoEm || 0) - (b.criadoEm || 0);
   }
   function totalDe(regs) {
     return Math.round(regs.reduce((s, r) => s + (r.tipo !== 'galeria' && r.valor > 0 ? Number(r.valor) : 0), 0) * 100) / 100;
@@ -550,9 +578,12 @@ const Veiculos = (() => {
       if (r.hodometro != null) meta.push(fmtKm(r.hodometro));
       if (r.litros > 0) meta.push(fmtNum(r.litros, 3) + ' ' + unidade(r.combustivel));
       if (r.tanqueCheio) meta.push('tanque cheio');
+      if (Number(r.desconto) > 0) meta.push('desconto ' + brl(r.desconto)); // V11
     } else if (r.tipo === 'manutencao') {
-      if (r.descricao) titulo = primeiraLinha(r.descricao);
+      titulo = nomeManutencao(r); // V11
       if (r.hodometro != null) meta.push(fmtKm(r.hodometro));
+      const n = (r.itens || []).length;
+      if (n > 1) meta.push(App().plural(n, '1 item', '# itens'));
     } else if (r.tipo === 'seguro') {
       if (r.seguradora) titulo += ' · ' + r.seguradora;
       if (r.validade) meta.push('validade ' + dataCurta(r.validade));
@@ -575,10 +606,14 @@ const Veiculos = (() => {
     const aviso = (tipo, texto) => ` · <button type="button" class="aviso-km aviso-botao" data-aviso="${tipo}" data-id="${esc(r.id)}">⚠️ ${texto}</button>`;
     if (avisoKm === 'sem') metaHtml += aviso('sem', 'sem hodômetro');
     if (avisoKm === 'ordem') metaHtml += aviso('ordem', 'km fora de ordem');
-    if (r.tipo === 'abastecimento' && difValores(r.precoLitro, r.litros, r.valor)) metaHtml += aviso('valores', 'valores não batem');
+    if (r.tipo === 'abastecimento' && difValores(r.precoLitro, r.litros, totalBomba(r))) metaHtml += aviso('valores', 'valores não batem');
     const selos = [];
     if (r.status === 'aguardando_ia') selos.push('<span class="selo aguardando">Aguardando leitura</span>');
-    if (r.status === 'revisar') selos.push('<span class="selo revisar">Revisar</span>');
+    if (r.status === 'revisar') {
+      const falta = r.tipo === 'abastecimento' ? Sync.faltaNoAbastecimento(r).length : 0;
+      selos.push(`<span class="selo revisar">Revisar${falta ? ' · falta ' + falta : ''}</span>`);
+    }
+    if (r.status === 'confirmado' && r.autoIA) selos.push('<span class="selo ia" title="Lido pela IA, sem faltar nada">✨ IA</span>'); // V11
     if (r.sync === 'pendente' || arqs.some(a => !a.enviado && a.blob)) selos.push('<span class="selo fila">Na fila</span>');
     const valor = r.tipo === 'galeria' ? `📷${nFotos > 1 ? ' ' + nFotos : ''}` : brl(r.valor);
     let mini = '';
@@ -589,6 +624,29 @@ const Veiculos = (() => {
     return `<div class="cartao${comMiniatura ? ' com-miniatura' : ''}" data-registro="${esc(r.id)}" role="button">${mini}` +
       `<div class="corpo"><div class="desc"><span class="icone-tipo" aria-hidden="true">${t.icone}</span> ${esc(titulo)}</div><div class="meta">${metaHtml}</div></div>` +
       `<div class="direita"><span class="valor">${valor}</span>${selos.join('')}</div></div>`;
+  }
+
+  /** V11: cartão "O consumo caiu X%" (o ✕ esconde até o consumo melhorar e cair de novo). */
+  async function cartaoConsumo(veiculoId, regs) {
+    let a = null;
+    try {
+      const fechados = await Banco.lerConfig('consumoFechado', {});
+      a = Relatorio.avisoConsumo(regs, fechados[veiculoId] || '');
+    } catch (e) { a = null; }
+    if (!a) return '';
+    const n1 = (x) => x.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const d = (iso) => iso.split('-').reverse().join('/');
+    const mesmoAno = a.de.slice(0, 4) === a.ate.slice(0, 4);
+    const maior = Math.max(...a.mini.map(b => b.kml));
+    const mini = a.mini.map(b => `<div class="${b.baixo ? 'baixo' : ''}" style="height:${Math.round(b.kml / maior * 100)}%"></div>`).join('');
+    return `<div class="aviso-consumo" data-consumo="${esc(a.ate)}" role="button"><div class="ac-cab"><span class="ac-ic">📉</span>` +
+      `<div class="ac-tit"><b>O consumo caiu ${a.pct}%</b><small>nos últimos ${Math.round(a.km).toLocaleString('pt-BR')} km ` +
+      `(de ${mesmoAno ? d(a.de).slice(0, 5) : d(a.de)} a ${d(a.ate)})</small></div>` +
+      '<button class="ac-x" type="button" data-fechar-consumo aria-label="Fechar o aviso">✕</button></div>' +
+      `<div class="ac-corpo"><div class="ac-mini">${mini}</div><div class="ac-nums"><div><small>Agora</small><b class="lar">${n1(a.agora)} km/L</b></div>` +
+      `<div><small>Antes</small><b>${n1(a.antes)} km/L</b></div></div></div>` +
+      '<div class="ac-dica">Vale conferir a calibragem dos pneus, o filtro de ar e as velas. Ou mudou o jeito de rodar (mais cidade, trânsito, ar-condicionado)?</div>' +
+      '<div class="ac-link">Ver no relatório ›</div></div>';
   }
 
   async function renderVeiculo(id) {
@@ -606,7 +664,7 @@ const Veiculos = (() => {
       $('vx-lista').innerHTML = '<div class="vazio">Nenhum gasto lançado ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar.</div>';
       return true;
     }
-    let html = '';
+    let html = await cartaoConsumo(v.id, regs); // V11: aviso de consumo caindo
     let mesAtual = '';
     regs.forEach((r) => {
       const m = String(r.data).slice(0, 7);
@@ -713,6 +771,23 @@ const Veiculos = (() => {
     if (r.status === 'revisar' || r.status === 'aguardando_ia' || r.status === 'erro_ia') { ir('v-registro', { registroId: id }); return; }
     App().abrirVer({ tipo: 'reg', id });
   }
+  /** V11: os itens da manutenção na tela de ver ("4 × Óleo (R$ 42,90 cada)   R$ 171,60"). */
+  function itensVerHtml(r) {
+    const it = r.tipo === 'manutencao' ? (r.itens || []).filter(i => i && (i.nome || i.valor != null)) : [];
+    if (!it.length) return '';
+    const L = App().linhaVer;
+    const soma = arred2(it.reduce((s, i) => s + (Number(i.valor) || 0), 0));
+    let h = `<div class="ver-secao">Serviços e peças (${it.length})</div><div class="ver-caixa itens-man">`;
+    it.forEach((i) => {
+      const q = Number(i.qtd) || 1;
+      const rot = (q !== 1 ? fmtNum(q, q % 1 ? 3 : 0).replace(/,?0+$/, '') + ' × ' : '') + (i.nome || 'Item') + (q !== 1 && i.unitario != null ? ` (${brl(i.unitario)} cada)` : '');
+      h += `<div class="ver-lin"><span>${esc(rot)}</span><b>${esc(i.valor != null ? brl(i.valor) : '—')}</b></div>`;
+    });
+    if (r.valor != null && Math.abs(soma - Number(r.valor)) > 0.004) {
+      h += L('Soma dos itens', brl(soma)) + L(Number(r.valor) < soma ? 'Desconto' : 'Diferença', brl(Math.abs(soma - Number(r.valor))));
+    }
+    return h + `<div class="ver-lin total"><span>Total</span><b>${esc(r.valor != null ? brl(r.valor) : brl(soma))}</b></div></div>`;
+  }
   async function htmlVer(id) {
     const r = await Banco.obter('registros', id);
     if (!r || r.excluirPendente) return null;
@@ -721,23 +796,32 @@ const Veiculos = (() => {
     const t = TIPOS[r.tipo] || { icone: '🚗', nome: 'Gasto' };
     const L = App().linhaVer;
     const arqs = (await Banco.porIndice('arquivos', 'lancamentoId', r.id)).filter(a => !a.remover);
-    const titulo = r.tipo === 'abastecimento' ? (r.combustivel || 'Abastecimento') : (r.descricao && r.tipo !== 'galeria' ? r.descricao : t.nome);
+    const titulo = r.tipo === 'abastecimento' ? (r.combustivel || 'Abastecimento') : r.tipo === 'manutencao' ? nomeManutencao(r)
+      : (r.descricao && r.tipo !== 'galeria' ? r.descricao : t.nome);
     const sub = [r.tipo === 'abastecimento' && r.tanqueCheio ? 'Tanque cheio' : '', dataCurta(r.data)].filter(Boolean).join(' · ');
     const un = unidade(r.combustivel);
     let corpo = `<div class="ver-cab"><div><div class="t">${t.icone} ${esc(titulo)}</div><div class="s">${esc(sub)}</div></div>` +
       (r.tipo !== 'galeria' ? `<div class="v">${r.valor != null ? brl(r.valor) : '—'}</div>` : '') + '</div><div class="ver-caixa">';
     if (r.tipo === 'abastecimento') {
       corpo += L('Litros', r.litros != null ? fmtNum(r.litros, 3) + ' ' + un : '') + L(un === 'm³' ? 'Preço do m³' : 'Preço do litro', r.precoLitro != null ? brl3(r.precoLitro) : '');
+      if (Number(r.desconto) > 0 && r.valor != null) { // V11
+        corpo += L('Total da bomba', brl(totalBomba(r))) + `<div class="ver-lin desconto"><span>Desconto</span><b>− ${esc(brl(r.desconto))}</b></div>` +
+          L('Valor pago', brl(r.valor)) + (r.litros > 0 ? L(`Com o desconto, o ${un === 'm³' ? 'm³' : 'litro'} saiu a`, brl3(r.valor / r.litros)) : '');
+      }
     }
     corpo += L('Hodômetro', r.hodometro != null && TEM_KM.has(r.tipo) ? fmtKm(r.hodometro) : '') +
       L('Data', r.tipo !== 'abastecimento' ? dataCurta(r.data) : '') +
       L('Seguradora', r.seguradora) + L('Nº da apólice', r.apolice) + L('Validade', r.validade ? dataCurta(r.validade) : '') +
-      L('Descrição', r.tipo !== 'abastecimento' && r.descricao && r.descricao !== titulo ? r.descricao : '') +
+      L('Descrição', r.tipo !== 'abastecimento' && r.descricao && r.descricao !== titulo && primeiraLinha(r.descricao) !== titulo ? r.descricao : '') +
+      (r.tipo === 'manutencao' && r.descricao && r.descricao.includes('\n') ? L('Descrição', r.descricao) : '') +
       L('Pagamento', r.formaPagamento) + L('Lançado por', autorDe(r.participante) || (r.meu === false ? 'outra pessoa' : 'você')) + '</div>';
+    corpo += itensVerHtml(r); // V11: itens da manutenção
     const coord = String(r.local || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
     const lat = r.lat != null ? r.lat : (coord ? Number(coord[1]) : null);
     const lng = r.lng != null ? r.lng : (coord ? Number(coord[2]) : null);
-    corpo += App().mapaHtml(lat, lng, coord ? '' : r.local, r.local || t.nome);
+    // V11: o local que veio da nota (SEFAZ ou IA) vale mais que o GPS
+    const daNota = !coord && /sefaz|ia/.test(r.fonte || '') && String(r.local || '').indexOf(' — ') > 0; // "Posto — endereço" vem da nota
+    corpo += App().mapaHtml(lat, lng, coord ? '' : r.local, r.local || t.nome, daNota ? 'nota' : '');
     const fotos = arqs.filter(a => a.tipo === 'foto');
     const audios = arqs.filter(a => a.tipo === 'audio');
     if (fotos.length || audios.length) {
@@ -985,6 +1069,9 @@ const Veiculos = (() => {
       if (ultimo && ultimo.formaPagamento) { r.formaPagamento = ultimo.formaPagamento; VR.auto.add('formaPagamento'); }
       r.precoLitro = r.combustivel ? ultimoPreco(r.combustivel) : null;
     }
+    // V11: no formulário, o "Valor total" do abastecimento é o total da bomba (valor pago + desconto)
+    if (r.tipo === 'abastecimento' && Number(r.desconto) > 0 && r.valor != null) r.valor = totalBomba(r);
+    VR.totalAuto = r.tipo === 'manutencao' && r.valor == null; // V11: o total acompanha a soma dos itens
     if (r.tipo === 'abastecimento') prepararTres();
     montarFormRegistro();
     await preencherFormRegistro();
@@ -1035,13 +1122,22 @@ const Veiculos = (() => {
           '<div class="tres-colunas">' +
             `<div>${campoValorHtml('vr-preco', '<span id="vr-preco-rotulo">Valor do litro</span>', 3, 'R$ 0,000')}</div>` +
             `<div>${campoValorHtml('vr-litros', '<span id="vr-litros-rotulo">Litros</span>', 3)}</div>` +
-            `<div>${campoValorHtml('vr-valor', 'Valor total', 2, 'R$ 0,00')}</div></div>` +
+            `<div>${campoValorHtml('vr-valor', '<span id="vr-valor-rotulo">Valor total</span>', 2, 'R$ 0,00')}</div></div>` +
           '<div class="tres-info" id="vr-tres"></div>' +
+          // V11: desconto (o valor pago fica total da bomba − desconto)
+          '<button type="button" class="link-pequeno" id="vr-tem-desconto">🏷️ Teve desconto?</button>' +
+          `<div id="vr-desc-bloco" class="oculto">${campoValorHtml('vr-desconto', 'Desconto (R$) <small class="opcional">(opcional)</small>')}` +
+          '<div class="valor-pago" id="vr-pago"></div></div>' +
           campoDataHtml() + HTML_PAGAMENTO + HTML_LOCAL;
         break;
       case 'manutencao':
-        html = campoDataHtml() + HTML_KM + campoValorHtml('vr-valor', 'Valor pago (R$)') +
-          campoDescricaoHtml('Descrição', 'Ex.: Troca de óleo e do filtro') + HTML_LOCAL + HTML_PAGAMENTO;
+        // V11: nome (opcional) e os itens: quantidade × valor de cada; o total acompanha a soma até a pessoa mudar
+        html = campoDataHtml() + HTML_KM +
+          '<label for="vr-descricao">Nome da manutenção <small class="opcional">(opcional)</small></label>' +
+          '<textarea id="vr-descricao" rows="1" class="cresce" autocapitalize="sentences" placeholder="Ex.: Revisão dos 115 mil km"></textarea>' +
+          '<label>Serviços e peças <small class="opcional">(quantidade × valor de cada)</small></label><div id="vr-itens"></div>' +
+          '<button type="button" class="botao pequeno" id="vr-add-item">+ Adicionar item</button>' +
+          campoValorHtml('vr-valor', 'Valor total (R$)') + '<small class="dica" id="vr-soma"></small>' + HTML_LOCAL + HTML_PAGAMENTO;
         break;
       case 'seguro':
         html = campoDataHtml() +
@@ -1089,7 +1185,14 @@ const Veiculos = (() => {
     if ($('vr-data')) definirData($('vr-data'), r.data || hoje());
     if ($('vr-valor')) $('vr-valor').value = paraMascara(r.valor, 2);
     if ($('vr-pagamento')) App().preencherSelect($('vr-pagamento'), meiosVeiculo(L.meios), r.formaPagamento, 'Não informado');
-    if ($('vr-descricao')) $('vr-descricao').value = r.descricao || '';
+    if ($('vr-descricao')) { $('vr-descricao').value = r.descricao || ''; crescer($('vr-descricao')); }
+    if (r.tipo === 'manutencao') { // V11
+      const itens = (r.itens || []).filter(i => i && (i.nome || i.valor != null));
+      $('vr-itens').innerHTML = '';
+      itens.forEach(i => addItemMan(i));
+      if (!itens.length && VR.modo === 'novo') addItemMan({});
+      atualizarItensMan();
+    }
     if ($('vr-local')) { $('vr-local').value = r.local || ''; atualizarXLocal(); }
     if ($('vr-km')) $('vr-km').value = textoKm(r.hodometro);
     if ($('vr-seguradora')) {
@@ -1106,6 +1209,7 @@ const Veiculos = (() => {
       $('vr-preco').value = paraMascara(r.precoLitro, 3);
       $('vr-litros').value = paraMascara(r.litros, 3);
       atualizarRotulosCombustivel();
+      if (Number(r.desconto) > 0) { $('vr-desconto').value = paraMascara(r.desconto, 2); mostrarDesconto(false); } // V11
       recalcularTres(null);
       atualizarBotaoVoz();
       renderIA();
@@ -1114,6 +1218,7 @@ const Veiculos = (() => {
     }
     if (TEM_KM.has(r.tipo)) { atualizarPlaceholderKm(); atualizarAvisoKm(); }
     if (r.tipo === 'abastecimento' || r.tipo === 'galeria') await renderFotos();
+    marcarFaltando(); // V11: no "revisar", o que falta fica marcado
     if (VR.somenteLeitura) {
       // só ver: os campos ficam desligados (as fotos e o áudio continuam abrindo)
       $('vr-conteudo').querySelectorAll('input, select, textarea, button').forEach((el) => {
@@ -1159,7 +1264,9 @@ const Veiculos = (() => {
     const auto = new Set(r.automaticos || []);
     if (r.status === 'aguardando_ia' && tem('precoLitro') && auto.has('precoLitro') && r.calculado !== 'precoLitro') c.precoLitro = 'pre';
     // o que o app calculou continua automático (guardado neste celular; vindo de outro celular, os litros)
-    if (tem('precoLitro') && tem('litros') && tem('valor') && !difValores(r.precoLitro, r.litros, r.valor)) {
+    // V11: lido da bomba/nota (IA ou SEFAZ): os três valores são os da bomba; nenhum é refeito pela conta
+    const lidoDaBomba = /ia|sefaz/.test(String(r.fonte || '')) && !r.calculado;
+    if (!lidoDaBomba && tem('precoLitro') && tem('litros') && tem('valor') && !difValores(r.precoLitro, r.litros, r.valor)) {
       c[Object.keys(c).includes(r.calculado) ? r.calculado : 'litros'] = 'calc';
     }
   }
@@ -1197,6 +1304,7 @@ const Veiculos = (() => {
   function atualizarTres() {
     const el = $('vr-tres');
     if (!el) return;
+    atualizarPago(); // V11
     const c = VR.calc;
     const T = ['precoLitro', 'litros', 'valor'];
     T.forEach((k) => {
@@ -1574,6 +1682,10 @@ const Veiculos = (() => {
       usou('formaPagamento');
     }
     if (c.data && livre('vr-data', 'data')) { definirData($('vr-data'), c.data); usou('data'); }
+    if (c.desconto > 0 && $('vr-desconto') && !daMascara($('vr-desconto'))) { // V11: desconto da nota
+      $('vr-desconto').value = paraMascara(c.desconto, 2);
+      mostrarDesconto(false);
+    }
     if (c.local && livre('vr-local', 'local')) { $('vr-local').value = c.local; usou('local'); VR.localPendente = false; atualizarXLocal(); }
     if (c.tanqueCheio === true && $('vr-tanque') && !$('vr-tanque').checked && VR.auto.has('tanqueCheio')) {
       $('vr-tanque').checked = true;
@@ -1675,7 +1787,7 @@ const Veiculos = (() => {
           : '<b>✓ A IA preencheu os campos que estavam vazios.</b> Confira antes de salvar.');
       } else if (r.status === 'revisar') {
         partes.push((r.resumoLeitura ? `<b>Leitura feita:</b> ${esc(r.resumoLeitura)}.` : '<b>A leitura foi feita.</b>') +
-          ' A IA preencheu os campos que estavam vazios. Confira e toque em Confirmar.');
+          ' A IA preencheu os campos que estavam vazios. Confira e toque em Confirmar.' + '<div id="vr-falta-resumo"></div>');
       } else if (r.fonte) {
         partes.push(textoFonte(r.fonte));
       }
@@ -1715,7 +1827,9 @@ const Veiculos = (() => {
       r.precoLitro = daMascara($('vr-preco'));
       r.litros = daMascara($('vr-litros'));
       r.calculado = ['precoLitro', 'litros', 'valor'].find(k => VR.calc[k] === 'calc') || ''; // fica só neste celular
+      r.desconto = $('vr-desconto') && !$('vr-desc-bloco').classList.contains('oculto') ? daMascara($('vr-desconto')) : null; // V11
     }
+    if (r.tipo === 'manutencao' && $('vr-itens')) r.itens = lerItensMan(); // V11
     if (r.tipo === 'seguro') {
       r.seguradora = val('vr-seguradora');
       r.apolice = val('vr-apolice');
@@ -1729,6 +1843,7 @@ const Veiculos = (() => {
     if (VR.lendo) { toast('Aguarde: a IA ainda está lendo.'); return; }
     if (Gravador.gravando()) await pararGravacao(false); // o áudio é lido depois, na sincronização
     if (VR.somenteLeitura) return;
+    if (VR.r.tipo === 'manutencao' && VR.totalAuto) atualizarItensMan(); // total em branco: vale a soma dos itens
     const r = VR.r;
     const t = TIPOS[r.tipo];
     recalcularTres(null, { ignorarFoco: true }); // o campo calculado que estava sendo apagado volta
@@ -1743,9 +1858,11 @@ const Veiculos = (() => {
         if (!r.combustivel) { toast('Escolha o combustível.'); return; }
         if (!(r.valor > 0) && !(r.precoLitro > 0 && r.litros > 0)) { toast(`Informe o valor total (ou o valor do ${gnv ? 'm³' : 'litro'} e ${gnv ? 'os m³' : 'os litros'}).`); return; }
         if (!(r.precoLitro > 0)) { toast(`Informe o valor do ${gnv ? 'm³' : 'litro'} ou ${gnv ? 'os m³' : 'os litros'}.`); return; }
+        if (r.desconto > 0 && r.valor > 0 && r.desconto >= r.valor) { toast('O desconto está maior que o total da bomba.'); return; } // V11
       } else if (r.tipo === 'galeria') {
         if (!nFotos && !r.descricao) { toast('Tire ou escolha uma foto (ou escreva um texto).'); return; }
       } else {
+        if (r.tipo === 'manutencao' && (r.itens || []).some(i => !i.nome)) { toast('Escreva o nome de cada item (ou apague o item vazio).'); return; } // V11
         if (!(r.valor > 0)) { toast('Informe o valor.'); return; }
         if (r.tipo === 'outros' && !r.descricao) { toast('Escreva a descrição da despesa.'); return; }
       }
@@ -1763,6 +1880,9 @@ const Veiculos = (() => {
       if (!(await App().confirmar(`Os três valores não batem: ${textoDifValores(r.precoLitro, r.litros, r.valor, r.combustivel)} ` +
           'Salvar mesmo assim? O lançamento fica marcado com ⚠️.', 'Salvar assim', 'Corrigir'))) return;
     }
+    // V11: o que fica gravado é o valor pago (total da bomba − desconto)
+    if (r.tipo === 'abastecimento' && r.desconto > 0 && r.valor != null) r.valor = arred2(r.valor - r.desconto);
+    r.autoIA = false; // a pessoa conferiu: sai o "✨ IA"
     r.status = pendente ? 'aguardando_ia' : 'confirmado';
     r.lerVoz = !!r.lerVoz;
     r.lerNota = !!r.lerNota;
@@ -1869,6 +1989,105 @@ const Veiculos = (() => {
     if (TRES[e.target.id] && e.type === 'input') recalcularTres(e.target.id);
     if (e.target.id === 'vr-data') atualizarPlaceholderKm();
     if (e.target.id === 'vr-km' || e.target.id === 'vr-data') atualizarAvisoKm();
+    // V11
+    if (e.target.id === 'vr-desconto') atualizarPago();
+    if (e.target.id === 'vr-descricao') crescer(e.target);
+    if (e.target.closest('#vr-itens')) atualizarItensMan();
+    if (e.target.id === 'vr-valor' && VR.r.tipo === 'manutencao' && e.type === 'input') { VR.totalAuto = !daMascara(e.target); atualizarItensMan(false); }
+    marcarFaltando();
+  }
+
+  // ---- V11: itens da manutenção ----
+  function addItemMan(i = {}) {
+    const div = document.createElement('div');
+    div.className = 'item-linha item-man';
+    div.innerHTML = `<input class="i-nome" placeholder="Peça ou serviço" autocapitalize="sentences" aria-label="Peça ou serviço" value="${esc(i.nome || '')}">` +
+      '<button type="button" class="remover-item" aria-label="Remover item">✕</button>' +
+      `<div class="item-calc"><input class="i-qtd" inputmode="decimal" placeholder="Qtd" aria-label="Quantidade" value="${esc(i.qtd != null ? String(i.qtd).replace('.', ',') : '1')}">` +
+      `<span>×</span><input class="i-unit" inputmode="decimal" placeholder="Valor de cada" aria-label="Valor de cada" value="${esc(numParaCampo(i.unitario != null ? i.unitario : (i.valor != null ? i.valor / (Number(i.qtd) || 1) : null), 3))}">` +
+      '<span>=</span><span class="i-total"></span></div>';
+    $('vr-itens').appendChild(div);
+    return div;
+  }
+  function lerItensMan() {
+    return Array.from($('vr-itens').querySelectorAll('.item-man')).map((d) => {
+      let qtd = lerNumBr(d.querySelector('.i-qtd').value, 3);
+      if (!(qtd > 0)) qtd = 1;
+      const unitario = lerNumBr(d.querySelector('.i-unit').value, 3);
+      const valor = unitario != null ? arred2(qtd * unitario) : null;
+      return { nome: d.querySelector('.i-nome').value.trim(), qtd, unitario, valor };
+    }).filter(i => i.nome || i.unitario != null);
+  }
+  // preencher=false: a pessoa está mexendo no próprio total (apagou tudo: o total volta a acompanhar a soma na próxima mudança dos itens)
+  function atualizarItensMan(preencher = true) {
+    if (!VR || VR.r.tipo !== 'manutencao' || !$('vr-itens')) return;
+    $('vr-itens').querySelectorAll('.item-man').forEach((d) => {
+      let q = lerNumBr(d.querySelector('.i-qtd').value, 3);
+      if (!(q > 0)) q = 1;
+      const u = lerNumBr(d.querySelector('.i-unit').value, 3);
+      d.querySelector('.i-total').textContent = u != null ? brl(arred2(q * u)) : '';
+    });
+    const it = lerItensMan();
+    const comValor = it.filter(i => i.valor != null);
+    const soma = arred2(comValor.reduce((s, i) => s + i.valor, 0));
+    if (VR.totalAuto && preencher) $('vr-valor').value = comValor.length ? paraMascara(soma, 2) : '';
+    const total = daMascara($('vr-valor')) || 0;
+    $('vr-soma').textContent = !comValor.length ? '' : VR.totalAuto ? `Soma dos itens: ${brl(soma)} (o total acompanha a soma)`
+      : `Soma dos itens: ${brl(soma)}${Math.abs(total - soma) < 0.005 ? '' : total < soma ? ` · desconto de ${brl(arred2(soma - total))}` : ' (o total foi mudado por você)'}`;
+  }
+  function crescer(t) {
+    if (!t || !t.classList.contains('cresce')) return;
+    t.style.height = 'auto';
+    t.style.height = Math.min(t.scrollHeight + 2, 160) + 'px';
+  }
+
+  // ---- V11: desconto do abastecimento ----
+  function mostrarDesconto(focar) {
+    if (!$('vr-desc-bloco')) return;
+    $('vr-desc-bloco').classList.remove('oculto');
+    $('vr-tem-desconto').classList.add('oculto');
+    if (focar) $('vr-desconto').focus();
+    atualizarPago();
+  }
+  function atualizarPago() {
+    const el = $('vr-pago');
+    if (!el) return;
+    const desc = !$('vr-desc-bloco').classList.contains('oculto') ? daMascara($('vr-desconto')) : null;
+    const total = daMascara($('vr-valor'));
+    const litros = daMascara($('vr-litros'));
+    const comDesconto = desc > 0;
+    $('vr-valor-rotulo').textContent = comDesconto ? 'Total da bomba' : 'Valor total';
+    if (!comDesconto || !(total > 0)) { el.innerHTML = ''; el.classList.add('oculto'); return; }
+    el.classList.remove('oculto');
+    if (desc >= total) { el.innerHTML = '⚠️ O desconto está maior que o total da bomba.'; return; }
+    const pago = arred2(total - desc);
+    const un = $('vr-combustivel').value === 'GNV' ? 'm³' : 'litro';
+    el.innerHTML = `Valor pago: <b>${esc(brl(pago))}</b>${litros > 0 ? ` · o ${un} saiu a ${esc(brl3(pago / litros))}` : ''}`;
+  }
+
+  // ---- V11: no "revisar", o que falta fica marcado (só ali) ----
+  const CAMPO_FALTA = { combustivel: 'vr-combustivel', precoLitro: 'vr-preco', litros: 'vr-litros', valor: 'vr-valor', hodometro: 'vr-km', formaPagamento: 'vr-pagamento', data: 'vr-data' };
+  const NOME_FALTA = { combustivel: 'o combustível', precoLitro: 'o valor do litro', litros: 'os litros', valor: 'o valor total', hodometro: 'o hodômetro', formaPagamento: 'a forma de pagamento', data: 'a data' };
+  function marcarFaltando() {
+    if (!VR || VR.modo !== 'revisar' || VR.r.tipo !== 'abastecimento' || VR.somenteLeitura || !$('vr-preco')) return;
+    const x = JSON.parse(JSON.stringify(VR.r));
+    lerCamposDoForm(x);
+    const falta = Sync.faltaNoAbastecimento(x);
+    Object.keys(CAMPO_FALTA).forEach((k) => {
+      const el = $(CAMPO_FALTA[k]);
+      if (!el) return;
+      const marcar = falta.includes(k);
+      el.classList.toggle('falta', marcar);
+      const ao = el.nextElementSibling && el.nextElementSibling.classList.contains('falta-txt') ? el.nextElementSibling : null;
+      if (marcar && !ao) el.insertAdjacentHTML('afterend', '<small class="falta-txt">⚠️ Falta preencher</small>');
+      if (!marcar && ao) ao.remove();
+    });
+    const resumo = $('vr-falta-resumo');
+    if (resumo) {
+      const nomes = falta.map(k => NOME_FALTA[k]);
+      resumo.innerHTML = nomes.length ? `<b>Falta ${nomes.length === 1 ? '1 coisa' : nomes.length + ' coisas'}:</b> ` +
+        esc(nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0]) + '.' : '';
+    }
   }
   /** Saiu de um dos três valores: o calculado que ficou vazio é refeito. */
   function aoSairDoCampo(e) {
@@ -1894,7 +2113,11 @@ const Veiculos = (() => {
       case 'vr-ler-agora': lerAgora(); break;
       case 'vr-gps': capturarLocal(VR.token, true); break;
       case 'vr-camera': tirarFotoGaleria(); break;
+      // V11
+      case 'vr-tem-desconto': mostrarDesconto(true); VR.alterado = true; break;
+      case 'vr-add-item': { const d = addItemMan({}); d.querySelector('.i-nome').focus(); VR.alterado = true; break; }
       default:
+        if (b.classList.contains('remover-item')) { b.closest('.item-man').remove(); VR.alterado = true; atualizarItensMan(); break; }
         if (b.dataset.ouvir) ouvirAudio(b);
         else if (b.dataset.removerAudio && !VR.somenteLeitura) removerAudio(b.dataset.removerAudio);
         break;
@@ -2059,7 +2282,7 @@ const Veiculos = (() => {
   }
   function resumoGasto(r, v) {
     const t = TIPOS[r.tipo] || { icone: '•', nome: r.tipo };
-    const nome = (r.tipo === 'manutencao' || r.tipo === 'outros') && r.descricao ? primeiraLinha(r.descricao) : t.nome;
+    const nome = r.tipo === 'manutencao' ? nomeManutencao(r) : r.tipo === 'outros' && r.descricao ? primeiraLinha(r.descricao) : t.nome;
     return `${t.icone} ${nome}${v ? ' · ' + v.modelo : ''}`;
   }
 
@@ -2073,7 +2296,7 @@ const Veiculos = (() => {
     const quem = vs.length === 1 ? vs[0].modelo : App().plural(vs.length, '1 veículo', '# veículos');
     if (!ult) return { qtd: vs.length, texto: quem + ' · nenhum gasto lançado ainda' };
     const t = TIPOS[ult.tipo] || { nome: ult.tipo };
-    const nome = (ult.tipo === 'manutencao' || ult.tipo === 'outros') && ult.descricao ? primeiraLinha(ult.descricao) : t.nome;
+    const nome = ult.tipo === 'manutencao' ? nomeManutencao(ult) : ult.tipo === 'outros' && ult.descricao ? primeiraLinha(ult.descricao) : t.nome;
     return { qtd: vs.length, texto: `${quem} · último gasto: ${nome}${vs.length > 1 ? ' (' + ids.get(ult.veiculoId).modelo + ')' : ''} · ${brl(ult.valor)}` };
   }
 
@@ -2120,7 +2343,21 @@ const Veiculos = (() => {
     $('vx-info').onclick = () => infoDoVeiculo();
     $('vf-obs').addEventListener('input', contarLetrasObs);
     $('vx-mais').onclick = () => menuDoVeiculo();
-    const abrirCartao = (e) => {
+    const abrirCartao = async (e) => {
+      const consumo = e.target.closest('[data-consumo]'); // V11
+      if (consumo) {
+        const veiculoId = dadosAtuais().veiculoId;
+        if (e.target.closest('[data-fechar-consumo]')) {
+          const fechados = await Banco.lerConfig('consumoFechado', {});
+          fechados[veiculoId] = consumo.dataset.consumo;
+          await Banco.gravarConfig('consumoFechado', fechados);
+          consumo.remove();
+        } else {
+          Relatorio.limpar();
+          ir('v-desempenho', { veiculoId });
+        }
+        return;
+      }
       const aviso = e.target.closest('[data-aviso]');
       if (aviso) { explicarAviso(aviso.dataset.aviso, aviso.dataset.id); return; } // o ⚠️ explica, não abre o gasto
       const c = e.target.closest('[data-registro]');

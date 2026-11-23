@@ -19,7 +19,7 @@ const Exportar = (() => {
     { id: 'link', sigla: 'G', cor: '#0f9d58', nome: 'Google Planilhas', texto: 'Um link para abrir no navegador ou no app do Google (vale por 30 dias)' },
     { id: 'pdf', sigla: 'PDF', cor: '#c62828', nome: 'PDF', texto: 'Só para ver ou imprimir (não dá para editar)' }
   ];
-  const E = { aberto: false, vez: 0, veiculo: null, regs: [], de: '', ate: '', formato: 'xlsx', lembrar: true, resultado: null, titulo: '', periodo: '' };
+  const E = { aberto: false, vez: 0, veiculo: null, regs: [], de: '', ate: '', formato: 'xlsx', resultado: null, titulo: '', periodo: '' };
 
   function hojeIso() {
     const a = new Date();
@@ -56,9 +56,7 @@ const Exportar = (() => {
     if (!p) { App().toast('Nenhum gasto lançado neste veículo ainda.'); return; }
     E.de = p.de;
     E.ate = p.ate;
-    E.formato = (await Banco.lerConfig('formatoPlanilha', null)) || 'xlsx';
-    if (!FORMATOS.some(f => f.id === E.formato)) E.formato = 'xlsx';
-    E.lembrar = true;
+    E.formato = 'xlsx'; // V11: sem o "Lembrar este formato": sempre começa no Excel
     E.resultado = null;
     E.aberto = true;
     E.vez++;
@@ -79,7 +77,6 @@ const Exportar = (() => {
       FORMATOS.map(f => `<button type="button" class="exp-formato${f.id === E.formato ? ' marcado' : ''}" data-formato="${f.id}" aria-pressed="${f.id === E.formato}">` +
         `<span class="exp-sigla" style="background:${f.cor}">${f.sigla}</span><span class="exp-ftexto"><b>${esc(f.nome)}</b><small>${esc(f.texto)}</small></span>` +
         '<span class="exp-radio"></span></button>').join('') + '</div>' +
-      `<label class="marcar"><input type="checkbox" id="exp-lembrar"${E.lembrar ? ' checked' : ''}> Lembrar este formato na próxima vez</label>` +
       `<p class="erro" id="exp-erro">${esc(erro)}</p>` +
       '<div class="botoes"><button class="botao" type="button" id="exp-cancelar">Cancelar</button><button class="botao primario" type="button" id="exp-gerar">Gerar planilha</button></div>');
     marcarAtalho();
@@ -103,7 +100,6 @@ const Exportar = (() => {
         x.setAttribute('aria-pressed', String(x === b));
       });
     };
-    $('exp-lembrar').onchange = () => { E.lembrar = $('exp-lembrar').checked; };
     $('exp-cancelar').onclick = () => fechar();
     $('exp-gerar').onclick = () => gerar();
   }
@@ -133,7 +129,6 @@ const Exportar = (() => {
       return;
     }
     try {
-      if (E.lembrar) await Banco.gravarConfig('formatoPlanilha', E.formato);
     } catch (e) { /* só uma preferência */ }
     const perfil = (await Perfil.obter()) || {};
     const dados = Relatorio.dadosPlanilha(v, regs, E.de, E.ate, {
