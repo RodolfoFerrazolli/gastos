@@ -9,6 +9,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icones/icone-192.png">
   <link rel="apple-touch-icon" href="icones/icone-192.png">
+  <link rel="stylesheet" href="vendor/leaflet.css">
   <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
@@ -209,6 +210,7 @@
 
       <label for="f-estab">Estabelecimento <small>(opcional)</small></label>
       <input id="f-estab" placeholder="Ex.: Restaurante Monte Sinai">
+      <div id="f-lugares"></div>
 
       <label>Fotos da nota ou comprovante</label>
       <div class="fotos" id="f-fotos"></div>
@@ -297,6 +299,10 @@
         <button class="botao" id="cfg-atualizar">Procurar atualização do app</button>
       </div>
       <p class="dica">No Wi-Fi o app envia tudo sozinho enquanto estiver aberto. Nos dados móveis, toque nas setas no alto da tela inicial.</p>
+
+      <h3>Lugares</h3>
+      <button class="botao" id="cfg-lugares" type="button">📍 Meus lugares</button>
+      <p class="dica">Os postos, oficinas e outros lugares que você já usou. Dá para marcar os favoritos ⭐, corrigir o nome e marcar o lugar no mapa.</p>
 
       <h3>Câmera</h3>
       <label class="marcar"><input type="checkbox" id="cfg-camera-sistema"> Usar a câmera do próprio celular</label>
@@ -413,6 +419,11 @@
       <label for="vf-cor">Cor</label>
       <input id="vf-cor" list="vf-cores" autocapitalize="words" autocomplete="off" placeholder="Ex.: Prata">
       <datalist id="vf-cores"></datalist>
+      <!-- V12: capacidade do tanque (a IA pesquisa na internet e mostra as fontes) -->
+      <label for="vf-tanque">Capacidade do tanque <small class="opcional">(litros)</small></label>
+      <div class="linha-busca"><input id="vf-tanque" inputmode="decimal" autocomplete="off" placeholder="Ex.: 54"><button class="botao pequeno" type="button" id="vf-buscar-tanque">🔎 Buscar</button></div>
+      <div id="vf-tanque-res"></div>
+      <small class="dica" id="vf-tanque-dica">A busca é feita sozinha quando montadora, modelo e ano estão preenchidos. Serve para avisar quando a bomba marcar mais litros do que cabe no tanque.</small>
       <label for="vf-obs">Observação <small class="opcional">(opcional)</small></label>
       <textarea id="vf-obs" rows="3" maxlength="1000" autocapitalize="sentences" placeholder="Ex.: Carro alugado para a viagem"></textarea>
       <small class="contador-letras" id="vf-obs-contador"></small>
@@ -511,6 +522,7 @@
     <div class="conteudo"><div class="grade-opcoes" id="rl-opcoes">
       <button class="opcao-grande" type="button" id="rl-gastos" data-rel="v-gastos"><span class="icone-grande">📊</span><b>Gastos</b><small>Lista e gráfico do que foi gasto no período</small></button>
       <button class="opcao-grande" type="button" id="rl-desempenho" data-rel="v-desempenho"><span class="icone-grande">🚀</span><b>Desempenho</b><small>Km rodados, consumo e custo por km</small></button>
+      <button class="opcao-grande" type="button" id="rl-pneus" data-rel="v-pneus"><span class="icone-grande">🛞</span><b>Pneus</b><small>Quando cada pneu foi trocado e quanto durou</small></button>
       <button class="opcao-grande exportar" type="button" id="rl-exportar"><span class="icone-grande">📥</span><span class="exp-ftexto"><b>Exportar planilha</b><small>Tudo numa planilha caprichada: gastos, abastecimentos, desempenho e gráficos</small></span></button>
     </div></div>
   </section>
@@ -529,6 +541,47 @@
       <span></span>
     </header>
     <div class="conteudo" id="rd-corpo"></div>
+  </section>
+
+  <!-- V12: Meus lugares e um lugar -->
+  <section id="tela-lugares" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="lg-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Meus lugares</div><div class="topo-sub">Os lugares que você já usou</div></div>
+      <span></span>
+    </header>
+    <div id="lg-corpo"></div>
+  </section>
+  <section id="tela-lugar" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="lu-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Lugar</div><div class="topo-sub" id="lu-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo">
+      <label for="lu-nome">Nome</label>
+      <input id="lu-nome" autocapitalize="words" autocomplete="off">
+      <label for="lu-cat">Categoria</label>
+      <select id="lu-cat"></select>
+      <label for="lu-end">Endereço</label>
+      <input id="lu-end" autocapitalize="sentences" autocomplete="off" placeholder="Rua, número — cidade">
+      <div class="mini-mapa oculto" id="lu-mapa"></div>
+      <small class="dica" id="lu-ponto"></small>
+      <div class="linha-botoes"><button class="botao pequeno" type="button" id="lu-mudar">🗺️ Mudar no mapa</button><button class="botao pequeno" type="button" id="lu-aqui">📍 Estou aqui agora</button></div>
+      <label class="marcar"><input type="checkbox" id="lu-fav"> ⭐ Favorito (aparece primeiro na hora de lançar)</label>
+      <div class="apelidos oculto" id="lu-apelidos"></div>
+      <div class="rodape-form"><button class="botao primario grande" type="button" id="lu-salvar">Salvar</button></div>
+    </div>
+  </section>
+
+  <!-- V12: Relatório · Pneus -->
+  <section id="tela-v-pneus" class="tela oculto">
+    <header class="topo">
+      <button class="botao-icone" id="rp-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo">Relatório · Pneus</div><div class="topo-sub" id="rp-sub"></div></div>
+      <span></span>
+    </header>
+    <div class="conteudo" id="rp-corpo"></div>
   </section>
 
   <!-- ============ APP REMOVIDO ============ -->
@@ -572,6 +625,23 @@
     </div>
   </div>
 
+  <!-- V12: marcar o lugar no mapa (arrasta o mapa até o alfinete ficar em cima do lugar) -->
+  <div id="mapa-lugar" class="mapa-lugar oculto" role="dialog" aria-label="Marcar o lugar no mapa">
+    <header class="topo">
+      <button class="botao-icone" id="ml-voltar" aria-label="Voltar">←</button>
+      <div class="topo-textos"><div class="topo-titulo" id="ml-titulo">Marcar o lugar</div><div class="topo-sub" id="ml-sub"></div></div>
+      <span></span>
+    </header>
+    <div id="ml-mapa" class="ml-mapa"></div>
+    <div class="ml-alfinete" aria-hidden="true"><svg viewBox="0 0 34 46"><ellipse cx="17" cy="43" rx="8" ry="3" fill="rgba(0,0,0,.25)"/><path d="M17 42 C 10 28, 1 21, 1 14 A 16 16 0 1 1 33 14 C 33 21, 24 28, 17 42 Z" fill="#d93025" stroke="#a51d14" stroke-width="1.5"/><circle cx="17" cy="14" r="6" fill="#fff"/></svg></div>
+    <div class="ml-dica">Arraste o mapa até o alfinete ficar em cima do lugar. Dá para aumentar com dois dedos.</div>
+    <button class="ml-onde" id="ml-onde" type="button" aria-label="Ir para onde estou">◎</button>
+    <div class="ml-baixo"><small>📍 O alfinete está em</small><b id="ml-end">…</b><button class="botao primario grande" type="button" id="ml-usar">Usar este lugar</button></div>
+  </div>
+
+  <!-- V12: aviso do envio do pedido de melhoria (em segundo plano) -->
+  <div id="fila-envio" class="fila-envio oculto" role="status" aria-live="polite"></div>
+
   <!-- ============ CÂMERA DO APP ============ -->
   <div id="camera" class="camera oculto" role="dialog" aria-label="Câmera">
     <video id="camera-video" playsinline muted autoplay></video>
@@ -586,6 +656,7 @@
     <div id="camera-carregando" class="camera-carregando oculto">Preparando a câmera…</div>
     <div id="camera-dica" class="camera-dica oculto">Toque na nota para focar.<br>Se ficar borrado, afaste um pouco o celular.</div>
     <div id="camera-msg" class="camera-msg oculto"></div>
+    <button id="camera-zoom" class="camera-zoom oculto" type="button">1,0×</button>
     <div class="camera-baixo">
       <span></span>
       <button id="camera-disparo" class="camera-disparo" type="button" aria-label="Tirar foto"></button>
@@ -628,7 +699,11 @@
   <script src="veiculos.js"></script>
   <script src="grupos.js"></script>
   <script src="relatorio.js"></script>
+  <script src="pneus.js"></script>
+  <script src="vendor/leaflet.js"></script>
+  <script src="lugares.js"></script>
   <script src="exportar.js"></script>
+  <script src="pedidos-fundo.js"></script>
   <script src="melhorias.js"></script>
   <script src="app.js"></script>
 </body>

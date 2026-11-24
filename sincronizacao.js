@@ -20,18 +20,21 @@ const Sync = (() => {
 
   // Campos que a pessoa edita no aparelho
   const CAMPOS_EDITAVEIS = ['dataHora', 'descricao', 'itens', 'valorTotal', 'categoria', 'meioPagamento', 'banco',
-    'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm', 'qrNota', 'fotosNota'];
+    'titular', 'estabelecimento', 'origem', 'status', 'lat', 'lng', 'precisao', 'alteradoEm', 'qrNota', 'fotosNota',
+    'enderecoMapa']; // V12: o endereço do lugar marcado no mapa
   // Campos que só o servidor preenche
   const CAMPOS_SERVIDOR = ['endereco', 'participante', 'transcricao', 'observacaoIA', 'qtdFotos', 'temAudio', 'fonteDados', 'chaveNota',
-    'enderecoDe', 'alteradoPor']; // V11: de onde veio o endereço; quem mexeu por último ("IA" = entrou direto: ✨)
+    'enderecoDe', 'alteradoPor', 'cnpj']; // V11: de onde veio o endereço; quem mexeu por último ("IA" = entrou direto: ✨)
   // Veículos (V4; a cor entrou na V5)
-  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'observacao', 'alteradoEm'];
+  const CAMPOS_VEICULO = ['montadora', 'modelo', 'ano', 'placa', 'cor', 'observacao', 'alteradoEm',
+    'tanque', 'pneusInicio']; // V12: capacidade do tanque e a troca antiga dos pneus
   // do veículo, só o servidor sabe: se é da conta ("meu") ou compartilhado com ela, e quem é o dono (V5)
   const CAMPOS_VEICULO_SERVIDOR = ['meu', 'dono'];
   const CAMPOS_REGISTRO = ['veiculoId', 'tipo', 'data', 'valor', 'formaPagamento', 'descricao', 'hodometro', 'combustivel',
     'tanqueCheio', 'precoLitro', 'litros', 'seguradora', 'apolice', 'validade', 'local', 'lat', 'lng', 'status', 'fonte',
     'qrNota', 'observacao', 'alteradoEm',
-    'desconto', 'itens']; // V11: desconto do abastecimento (o "valor" é o valor pago) e itens da manutenção
+    'desconto', 'itens', // V11: desconto do abastecimento (o "valor" é o valor pago) e itens da manutenção
+    'pneus', 'cnpj']; // V12: pneus trocados na manutenção; CNPJ do posto ou da oficina
   const CAMPOS_REGISTRO_SERVIDOR = ['qtdFotos', 'participante', 'alteradoPor', 'meu'];
 
   function conexao() {
@@ -794,26 +797,13 @@ const Sync = (() => {
       // M) pedidos de correção ou melhoria (V6): sobem com o áudio e a imagem da tela
       const perfilAgora = await Perfil.obter();
       const servidorAntesDaV6 = !!(perfilAgora && perfilAgora.versaoServidor && Number(perfilAgora.versaoServidor) < 6);
-      if (!somenteBaixar && !servidorAntesDaV6) {
-        for (const m of ((await Banco.lerConfig('melhoriasPendentes', [])) || []).slice()) {
-          avisar('sincronizando', { manual, visivel, detalhe: 'Enviando o pedido de melhoria…' });
-          const dados = {
-            id: m.id, criadoEm: m.criadoEm, tela: m.tela, nomeTela: m.nomeTela, janela: m.janela || '', texto: m.texto || '',
-            duracao: m.duracao || 0, versaoApp: m.versaoApp || '', aparelho: m.aparelho || ''
-          };
-          if (m.audio) dados.audio = { mime: m.audioMime || m.audio.type || 'audio/webm', base64: await blobParaBase64(m.audio) };
-          if (m.imagem) dados.imagem = { mime: 'image/jpeg', base64: await blobParaBase64(m.imagem) };
-          // V10: fotos tiradas ou da galeria (o servidor antigo ignora)
-          if (Array.isArray(m.fotos) && m.fotos.length) {
-            dados.fotos = [];
-            for (const f of m.fotos.slice(0, 5)) dados.fotos.push({ mime: f.type || 'image/jpeg', base64: await blobParaBase64(f) });
-          }
-          const r = await item(() => Api.chamar('enviarMelhoria', { melhoria: dados }, { tempoMs: 120000 }), resumo, 'pedido de melhoria');
-          if (!r) continue;
-          const resto = ((await Banco.lerConfig('melhoriasPendentes', [])) || []).filter(x => x.id !== m.id);
-          await Banco.gravarConfig('melhoriasPendentes', resto);
-          resumo.melhorias = (resumo.melhorias || 0) + 1;
-        }
+      if (!somenteBaixar && !servidorAntesDaV6 && ((await Banco.lerConfig('melhoriasPendentes', [])) || []).length) {
+        // V12: o mesmo envio do segundo plano (com a mesma trava: nunca manda o mesmo pedido duas vezes ao mesmo tempo)
+        avisar('sincronizando', { manual, visivel, detalhe: 'Enviando o pedido de melhoria…' });
+        const r = await PedidosFundo.enviarTodos();
+        resumo.melhorias = (resumo.melhorias || 0) + (r.enviados || 0);
+        (r.erros || []).forEach(x => resumo.erros.push('pedido de melhoria: ' + (x.mensagem || x.codigo || 'recusado')));
+        if (r.semRede && !r.enviados) resumo.erros.push('pedido de melhoria: sem conexão com o servidor');
       }
 
       // G) grupos (V9): manda o que mudou e traz os grupos de que a conta participa (servidor antigo: fica guardado aqui)
@@ -822,6 +812,9 @@ const Sync = (() => {
         const rg = await item(() => Grupos.sincronizar({ enviar: !somenteBaixar }), resumo, 'grupos');
         if (rg && rg.recusados) resumo.gruposRecusados = rg.recusados;
       }
+
+      // L) lugares (V12): o que a pessoa corrigiu (nome, ponto, favorito) vai e volta para os outros celulares da conta
+      if (typeof Lugares !== 'undefined') await item(() => Lugares.sincronizar({ enviar: !somenteBaixar }), resumo, 'lugares');
 
       // 6) novidades do servidor (histórico da conta, outros celulares, IA, administrador, endereços, listas)
       const desde = (await Banco.lerConfig('desde', 0)) || 0;

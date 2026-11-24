@@ -35,6 +35,7 @@ const Visor = (() => {
       urls: [], escala: 1, tx: 0, ty: 0, vez: 0
     };
     $('visor').classList.remove('oculto');
+    if (typeof travarZoomDaPagina === 'function') travarZoomDaPagina(true, 'visor'); // V12
     document.body.classList.add('sem-rolagem');
     if (window.App && App.abrirCamada) App.abrirCamada('visor'); // V8: entrada própria no histórico
     mostrar(estado.i, 0);
@@ -56,6 +57,7 @@ const Visor = (() => {
     im.removeAttribute('src');
     im.style.transform = '';
     $('visor').classList.add('oculto');
+    if (typeof travarZoomDaPagina === 'function') travarZoomDaPagina(false, 'visor');
     $('visor-msg').classList.add('oculto');
     document.body.classList.remove('sem-rolagem');
   }

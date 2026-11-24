@@ -73,14 +73,18 @@ const Melhorias = (() => {
     58: 'Ver gasto do veículo',
     59: 'Ver despesa do grupo',
     60: 'Pedido resolvido (aviso)',
-    61: 'Pedido não vai ser feito (aviso)'
+    61: 'Pedido não vai ser feito (aviso)',
+    62: 'Relatório: Pneus',
+    63: 'Meus lugares',
+    64: 'Lugar (editar)',
+    65: 'Marcar o lugar no mapa'
   };
   const LISTA = { manutencao: 20, seguro: 23, ipva: 26, licenciamento: 28, multa: 30, outros: 32, galeria: 34 };
   const ITEM = { abastecimento: 19, manutencao: 21, seguro: 24, ipva: 27, licenciamento: 29, multa: 31, outros: 33, galeria: 35 };
   const TELAS_SIMPLES = {
     inicio: 1, voz: 3, foto: 4, form: 5, config: 9, 'boas-vindas': 11, senha: 12, whatsapp: 13, removido: 14,
     veiculos: 15, 'veiculo-form': 16, veiculo: 17, 'v-compartilhar': 36,
-    lancamentos: 41, 'v-relatorio': 42, 'v-desempenho': 45,
+    lancamentos: 41, 'v-relatorio': 42, 'v-desempenho': 45, 'v-pneus': 62, lugares: 63, lugar: 64,
     grupos: 47, 'grupo-despesa': 52, 'grupo-pessoa': 53, 'grupo-relatorio': 54
   };
   const ABA_GRUPO = { despesas: 48, saldos: 49, acertar: 50, pessoas: 51 };
@@ -98,6 +102,7 @@ const Melhorias = (() => {
     else if (document.querySelector('.folha-mais') && App().telaAtual() === 'lancamentos') num = 56;
     else if (document.querySelector('.dialogo.exportar')) num = 46; // V8
     else if (document.querySelector('.dialogo.g-folha')) num = 55; // V9
+    else if (visivel('mapa-lugar')) num = 65; // V12
     else if (visivel('recorte')) num = 7;
     else if (visivel('camera')) num = 6;
     else {
@@ -314,9 +319,59 @@ const Melhorias = (() => {
     }
     App().fecharDialogo();
     descartar();
-    App().toast(Sync.conexao() === 'wifi' ? 'Obrigado! O pedido vai para o organizador agora.'
-      : 'Obrigado! O pedido vai para o organizador na próxima sincronização (no Wi-Fi é automático).', 4500);
-    App().agendarSync(800);
+    enviarEmSegundoPlano(registro); // V12: a janela fecha na hora; o envio continua (qualquer internet)
+  }
+
+  // ------------------------------------------------------------------
+  //  V12: envio em segundo plano, com a barrinha de aviso embaixo
+  // ------------------------------------------------------------------
+  let relogioBarra = null;
+  function barra(tipo, html, ms) {
+    const b = $('fila-envio');
+    if (!b) return;
+    clearTimeout(relogioBarra);
+    b.className = 'fila-envio' + (tipo === 'enviando' ? '' : ' ' + tipo);
+    b.innerHTML = html;
+    if (ms) relogioBarra = setTimeout(() => b.classList.add('oculto'), ms);
+  }
+
+  function resumoDoPedido(m) {
+    const partes = [];
+    if (m.audio) partes.push('áudio de ' + App().fmtDuracao(Math.round(m.duracao || 0)));
+    const n = (m.fotos || []).length;
+    if (n) partes.push(n + (n === 1 ? ' foto' : ' fotos'));
+    return partes.length ? ' (' + partes.join(' e ') + ')' : '';
+  }
+
+  async function enviarEmSegundoPlano(registro) {
+    barra('enviando', `<span class="gira" aria-hidden="true"></span><span>Enviando seu pedido${resumoDoPedido(registro)}… Pode continuar usando ou fechar o app.</span>`);
+    const agendado = await PedidosFundo.agendar(); // se fechar o app ou cair a internet, o Android termina o envio
+    let r = { semRede: !navigator.onLine };
+    if (navigator.onLine) {
+      try { r = await PedidosFundo.enviarTodos(); } catch (e) { r = { semRede: true }; }
+    }
+    const ainda = (await PedidosFundo.pendentes()).some(x => x.id === registro.id);
+    if (!ainda) {
+      barra('ok', '<span aria-hidden="true">✓</span><span>Pedido enviado. Obrigado!</span>', 3500);
+      if (window.Sync && Sync.atualizarPendentes) Sync.atualizarPendentes();
+      return;
+    }
+    if (r.semRede) {
+      barra('erro', '<span aria-hidden="true">📴</span><span>Sem internet agora. Seu pedido está guardado e vai sozinho quando a internet voltar' +
+        (agendado ? ', mesmo com o app fechado.' : ' (com o app aberto).') + '</span>', 9000);
+    } else {
+      barra('erro', '<span aria-hidden="true">⚠️</span><span>Não deu para enviar o pedido agora. Ele está guardado e o app tenta de novo.</span>', 9000);
+    }
+  }
+
+  /** O service worker avisa quando mandou os pedidos que estavam esperando a internet. */
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', (ev) => {
+      const d = ev.data || {};
+      if (d.tipo !== 'pedidosEnviados' || !d.enviados) return;
+      barra('ok', `<span aria-hidden="true">✓</span><span>${d.enviados === 1 ? 'Pedido enviado' : d.enviados + ' pedidos enviados'}. Obrigado!</span>`, 3500);
+      if (window.Sync && Sync.atualizarPendentes) Sync.atualizarPendentes();
+    });
   }
 
   function novoId() {

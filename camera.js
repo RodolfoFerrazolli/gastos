@@ -11,6 +11,23 @@
 //  Se não der para usar a câmera aqui (permissão negada, por exemplo),
 //  oferece a câmera do próprio celular.
 // =====================================================================
+/**
+ * V12: enquanto a câmera, o recorte ou o visor de fotos estão abertos, a pinça não pode aumentar a página
+ * (no Android, os botões saíam da tela). Trava o zoom da página e volta como estava quando a última camada fecha.
+ */
+const travarZoomDaPagina = (() => {
+  const quem = new Set();
+  let original = null;
+  return function (ligar, nome) {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    if (original === null) original = meta.getAttribute('content') || 'width=device-width, initial-scale=1';
+    if (ligar) quem.add(nome || 'camada'); else quem.delete(nome || 'camada');
+    const conteudo = quem.size ? original.replace(/,\s*(maximum-scale|user-scalable)=[^,]*/g, '') + ', maximum-scale=1, user-scalable=no' : original;
+    if (meta.getAttribute('content') !== conteudo) meta.setAttribute('content', conteudo);
+  };
+})();
+
 const Camera = (() => {
   const $ = (id) => document.getElementById(id);
   const CHAVE = 'cameraTraseira'; // configuração: { deviceId, label } da câmera escolhida
@@ -57,9 +74,11 @@ const Camera = (() => {
     limparRelogios();
     pararStream();
     estado = null;
+    aplicarZoom(1);
     $('camera').classList.add('oculto');
     $('camera-foco').classList.add('oculto');
     document.body.classList.remove('sem-rolagem');
+    travarZoomDaPagina(false, 'camera');
     // V8: sem foto, tira a entrada do histórico; com foto, ela fica para o recorte que vem logo depois
     if (!resultado && window.App && App.fecharCamada) App.fecharCamada();
     resolver(resultado || null);
@@ -164,6 +183,7 @@ const Camera = (() => {
   /** Troca para outra câmera. Se ela não abrir, volta para a câmera padrão. */
   async function trocarPara(deviceId) {
     if (!estado) return false;
+    aplicarZoom(1);
     limparRelogios();
     pararStream();
     await esperar(150);
@@ -291,6 +311,8 @@ const Camera = (() => {
       $('camera-foco').classList.add('oculto');
       $('camera').classList.remove('oculto');
       document.body.classList.add('sem-rolagem');
+      travarZoomDaPagina(true, 'camera'); // V12: a pinça não aumenta a página inteira (os botões sumiam)
+      aplicarZoom(1);
       if (window.App && App.abrirCamada) App.abrirCamada('camera'); // V8: entrada própria no histórico
       if (!suportada()) { mostrarErro(null); return; }
       ligar().catch((e) => { if (estado) { pararStream(); mostrarErro(e); } });
@@ -347,6 +369,8 @@ const Camera = (() => {
     }
     if (!estado || estado.track !== track) return;
     if (!foto || !foto.size) foto = await quadroDoVideo();
+    if (!estado) return;
+    if (foto && estado.zoom > 1.01) foto = await recortarCentro(foto, estado.zoom);
     if (!estado) return;
     if (!foto) {
       estado.ocupado = false;
@@ -466,7 +490,8 @@ const Camera = (() => {
 
   async function focarEm(ev) {
     if (!estado || !estado.track || estado.ocupado) return;
-    if (ev.target.closest('button, label, .camera-msg, .camera-topo, .camera-baixo')) return;
+    if (ev.target.closest('button, label, .camera-msg, .camera-topo, .camera-baixo, .camera-zoom')) return;
+    if (Date.now() - pincaEm < 400) return; // acabou de usar a pinça
     const v = $('camera-video');
     const vw = v.videoWidth;
     const vh = v.videoHeight;
@@ -534,7 +559,90 @@ const Camera = (() => {
     prepararRecursos();
   }
 
+  // ------------------------------------------------------------------
+  //  V12: zoom com a pinça (dois dedos). É um zoom digital: o vídeo aumenta na tela e a foto
+  //  sai recortada do centro, do mesmo tamanho que aparece. De 1× a 4×.
+  // ------------------------------------------------------------------
+  let pinca = null;
+  let pincaEm = 0;
+  const ZOOM_MAX = 4;
+
+  function textoZoom(z) { return z.toFixed(1).replace('.', ',') + '×'; }
+
+  function aplicarZoom(z) {
+    z = Math.min(ZOOM_MAX, Math.max(1, z || 1));
+    if (z < 1.04) z = 1;
+    if (estado) estado.zoom = z;
+    const v = $('camera-video');
+    if (v) v.style.transform = z > 1 ? `scale(${z})` : '';
+    const p = $('camera-zoom');
+    if (p) {
+      p.textContent = textoZoom(z);
+      p.classList.toggle('oculto', z === 1);
+      p.setAttribute('aria-label', z === 1 ? '' : `Zoom ${textoZoom(z)}. Toque para voltar ao normal`);
+    }
+  }
+
+  function distancia(t) {
+    const dx = t[0].clientX - t[1].clientX;
+    const dy = t[0].clientY - t[1].clientY;
+    return Math.hypot(dx, dy) || 1;
+  }
+
+  function aoTocarZoom(ev) {
+    if (!estado || ev.touches.length !== 2) return;
+    pinca = { d: distancia(ev.touches), z: estado.zoom || 1 };
+    pincaEm = Date.now();
+    ev.preventDefault();
+  }
+  function aoMoverZoom(ev) {
+    if (!estado) return;
+    if (ev.touches.length >= 2) ev.preventDefault(); // nunca deixa a página aumentar
+    if (!pinca || ev.touches.length !== 2) return;
+    aplicarZoom(pinca.z * distancia(ev.touches) / pinca.d);
+    pincaEm = Date.now();
+  }
+  function aoSoltarZoom(ev) {
+    if (pinca && ev.touches.length < 2) { pinca = null; pincaEm = Date.now(); }
+  }
+
+  /** Recorta o centro da foto pelo zoom (o que aparecia na tela). */
+  async function recortarCentro(foto, z) {
+    try {
+      let img;
+      if (window.createImageBitmap) img = await createImageBitmap(foto);
+      else {
+        img = await new Promise((ok, falha) => {
+          const i = new Image();
+          i.onload = () => ok(i);
+          i.onerror = falha;
+          i.src = URL.createObjectURL(foto);
+        });
+      }
+      const w = img.width;
+      const h = img.height;
+      const cw = Math.round(w / z);
+      const ch = Math.round(h / z);
+      const c = document.createElement('canvas');
+      c.width = cw;
+      c.height = ch;
+      c.getContext('2d').drawImage(img, Math.round((w - cw) / 2), Math.round((h - ch) / 2), cw, ch, 0, 0, cw, ch);
+      if (img.close) img.close();
+      const b = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.92));
+      c.width = c.height = 0;
+      return b && b.size ? b : foto;
+    } catch (e) {
+      return foto;
+    }
+  }
+
   function iniciar() {
+    const cam = $('camera');
+    cam.addEventListener('touchstart', aoTocarZoom, { passive: false });
+    cam.addEventListener('touchmove', aoMoverZoom, { passive: false });
+    cam.addEventListener('touchend', aoSoltarZoom);
+    cam.addEventListener('touchcancel', aoSoltarZoom);
+    $('camera-zoom').onclick = (ev) => { ev.stopPropagation(); aplicarZoom(1); };
     $('camera-fechar').onclick = () => fechar(null);
     $('camera-disparo').onclick = () => capturar();
     $('camera-lanterna').onclick = () => alternarLuz();
@@ -576,5 +684,5 @@ const Camera = (() => {
   }
 
   iniciar();
-  return { abrir, abrirSistema, suportada, aberta: () => !!estado, cancelar: () => fechar(null), esquecerEscolha };
+  return { abrir, abrirSistema, suportada, aberta: () => !!estado, cancelar: () => fechar(null), esquecerEscolha, travarZoomDaPagina, recortarCentro };
 })();

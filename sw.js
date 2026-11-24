@@ -2,7 +2,9 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v11';
+const VERSAO = 'gastos-v12';
+// V12: o envio dos pedidos de melhoria continua aqui, mesmo com o app fechado (quando a internet voltar)
+try { importScripts('./config.js', './pedidos-fundo.js'); } catch (e) { /* sem o envio em segundo plano */ }
 const ARQUIVOS = [
   './',
   './index.html',
@@ -23,8 +25,13 @@ const ARQUIVOS = [
   './veiculos.js',
   './grupos.js',
   './relatorio.js',
+  './pneus.js',
+  './lugares.js',
+  './vendor/leaflet.js',
+  './vendor/leaflet.css',
   './exportar.js',
   './melhorias.js',
+  './pedidos-fundo.js',
   './vendor/html2canvas.min.js',
   './app.js',
   './manifest.webmanifest',
@@ -45,6 +52,16 @@ self.addEventListener('activate', (e) => {
       .then(chaves => Promise.all(chaves.filter(k => k !== VERSAO && k.indexOf('gastos-') === 0).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('sync', (e) => {
+  if (typeof PedidosFundo === 'undefined' || e.tag !== PedidosFundo.ETIQUETA) return;
+  e.waitUntil(PedidosFundo.enviarTodos().then(async (r) => {
+    if (r.enviados) {
+      for (const c of await self.clients.matchAll({ includeUncontrolled: true })) c.postMessage({ tipo: 'pedidosEnviados', enviados: r.enviados });
+    }
+    if (r.semRede) throw new Error('sem internet: o Android tenta de novo mais tarde');
+  }));
 });
 
 self.addEventListener('message', (e) => {

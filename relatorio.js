@@ -309,6 +309,19 @@ const Relatorio = (() => {
         (i.valor != null ? ' = ' + brl(i.valor) : '');
     }).join('; ');
   }
+  /** V12: os itens da manutenção (bem resumido), com o desconto quando a soma passa do total. */
+  function caixaItensMan(r) {
+    const esc = App().esc;
+    const it = (r.itens || []).filter(i => i && i.nome);
+    const q = (x) => String(Math.round((Number(x) || 1) * 1000) / 1000).replace('.', ',');
+    const soma = it.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+    const total = Number(valor(r)) || 0;
+    const dif = Math.round((soma - total) * 100) / 100;
+    return '<div class="man-itens">' + it.map(i => `<div class="mi"><span>${Number(i.qtd || 1) !== 1 ? q(i.qtd) + '× ' : ''}${esc(i.nome)}</span>` +
+      `<span>${i.valor != null ? brl(i.valor) : '—'}</span></div>`).join('') +
+      (dif >= 0.01 ? `<div class="mi desc"><span>Desconto</span><span>− ${brl(dif)}</span></div>` : '') +
+      `<div class="mi tot"><span>Total</span><span>${brl(total)}</span></div></div>`;
+  }
   function nomeManutencaoRel(r) {
     if (r.descricao) return String(r.descricao).split('\n')[0].trim();
     const it = (r.itens || []).filter(i => i && i.nome);
@@ -456,10 +469,10 @@ const Relatorio = (() => {
   // ------------------------------------------------------------------
   //  Telas
   // ------------------------------------------------------------------
-  const R = { veiculoId: null, de: '', ate: '', aba: 'lista', abertos: new Set(), regs: [], ordem: 'recentes' };
+  const R = { veiculoId: null, de: '', ate: '', aba: 'lista', abertos: new Set(), itensAbertos: new Set(), regs: [], ordem: 'recentes' };
 
   function limpar() {
-    R.veiculoId = null; R.de = ''; R.ate = ''; R.aba = 'lista'; R.abertos = new Set(); R.assinatura = '';
+    R.veiculoId = null; R.de = ''; R.ate = ''; R.aba = 'lista'; R.abertos = new Set(); R.itensAbertos = new Set(); R.assinatura = '';
     $('rg-corpo').innerHTML = ''; $('rd-corpo').innerHTML = '';
   }
 
@@ -547,8 +560,14 @@ const Relatorio = (() => {
           `<span>${litros(r) ? num(r.litros, 3) + ' L' : '—'}</span><b>${brl(valor(r))}</b></div>`);
       html += grupo('manut', '🔧 Manutenções', g.manutencoes,
         '<div class="lin4 cab"><span>Data</span><span>Descrição</span><span>Km</span><span>Total</span></div>',
-        r => `<div class="lin4"><span>${dataAA(r.data)}</span><span class="quebra">${esc(nomeManutencaoRel(r))}</span>` +
-          `<span>${temKm(r) ? km(r.hodometro) : '—'}</span><b>${brl(valor(r))}</b></div>`);
+        r => {
+          // V12: com 2 itens ou mais, tocar na linha abre a lista dos itens logo abaixo
+          const varios = (r.itens || []).filter(i => i && i.nome).length >= 2;
+          const ab = varios && R.itensAbertos.has(r.id);
+          return `<div class="lin4${varios ? ' tem-itens' : ''}${ab ? ' aberta' : ''}"${varios ? ` data-itens="${esc(r.id)}" role="button" tabindex="0"` : ''}>` +
+            `<span>${dataAA(r.data)}</span><span class="quebra">${esc(nomeManutencaoRel(r))}${varios ? `<span class="seta-it">${ab ? '▲' : '▼'}</span>` : ''}</span>` +
+            `<span>${temKm(r) ? km(r.hodometro) : '—'}</span><b>${brl(valor(r))}</b></div>` + (ab ? caixaItensMan(r) : '');
+        });
       html += grupo('desp', '🧾 Despesas', g.despesas,
         '<div class="lin3 cab"><span>Data</span><span>Tipo</span><span>Total</span></div>',
         r => `<div class="lin3"><span>${dataAA(r.data)}</span><span>${esc(NOME_TIPO[r.tipo] || r.tipo)}</span><b>${brl(valor(r))}</b></div>`);
@@ -721,6 +740,15 @@ const Relatorio = (() => {
     // Gastos: período, abas, grupos e arrastar para o lado
     const rg = $('rg-corpo');
     rg.addEventListener('click', (e) => {
+      const li = e.target.closest('[data-itens]');
+      if (li) { // V12: abre ou fecha os itens da manutenção
+        const id = li.dataset.itens;
+        if (R.itensAbertos.has(id)) R.itensAbertos.delete(id); else R.itensAbertos.add(id);
+        const y = window.scrollY;
+        desenharGastos();
+        window.scrollTo(0, y);
+        return;
+      }
       const b = e.target.closest('button');
       if (!b) return;
       if (b.classList.contains('campo-data')) { U().abrirCalendario(b); return; }

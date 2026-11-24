@@ -20,7 +20,7 @@ const Veiculos = (() => {
   const $ = (id) => document.getElementById(id);
   const App = () => window.App; // funções do app.js (que é carregado depois deste arquivo)
 
-  const TELAS = ['veiculos', 'veiculo-form', 'veiculo', 'v-menu', 'v-lista', 'v-registro', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho'];
+  const TELAS = ['veiculos', 'veiculo-form', 'veiculo', 'v-menu', 'v-lista', 'v-registro', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho', 'v-pneus'];
   const COMBUSTIVEIS = ['Gasolina Comum', 'Gasolina Aditivada', 'Gasolina Premium', 'Etanol Comum', 'Etanol Aditivado',
     'Diesel S10', 'Diesel S500', 'GNV'];
   // sugestões no campo "Montadora" (dá para digitar outra)
@@ -308,6 +308,7 @@ const Veiculos = (() => {
       case 'v-registro': return prepararRegistro(dados);
       case 'v-compartilhar': return renderCompartilhar(dados.veiculoId);
       case 'v-relatorio': case 'v-gastos': case 'v-desempenho': return Relatorio.preparar(tela, dados); // V7 (relatorio.js)
+      case 'v-pneus': return Pneus.preparar(dados); // V12 (pneus.js)
       default: return false;
     }
   }
@@ -358,7 +359,7 @@ const Veiculos = (() => {
   /** Terminou uma sincronização: as listas abertas mostram o que chegou. */
   async function aoSincronizar() {
     const tela = App().telaAtual();
-    if (!['veiculos', 'veiculo', 'v-menu', 'v-lista', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho'].includes(tela) || navegando) return;
+    if (!['veiculos', 'veiculo', 'v-menu', 'v-lista', 'v-compartilhar', 'v-relatorio', 'v-gastos', 'v-desempenho', 'v-pneus'].includes(tela) || navegando) return;
     const y = window.scrollY;
     if (!(await preparar(tela, dadosAtuais()))) { history.back(); return; } // o veículo foi excluído em outro celular
     if (App().telaAtual() === tela) window.scrollTo(0, y);
@@ -443,7 +444,7 @@ const Veiculos = (() => {
   // ------------------------------------------------------------------
   //  Cadastro do veículo
   // ------------------------------------------------------------------
-  const VF = { id: null, alterado: false, existentes: [], fotosNovas: [], removerIds: [] }; // V10: fotos do veículo
+  const VF = { id: null, alterado: false, existentes: [], fotosNovas: [], removerIds: [], tanqueBusca: { chave: '', res: null } }; // V10: fotos do veículo
 
   async function prepararFormVeiculo(id) {
     let v = null;
@@ -460,6 +461,9 @@ const Veiculos = (() => {
     $('vf-placa').value = v ? v.placa || '' : '';
     $('vf-cor').value = v ? v.cor || '' : '';
     $('vf-obs').value = v ? v.observacao || '' : '';
+    $('vf-tanque').value = v && Number(v.tanque) > 0 ? fmtNum(v.tanque, v.tanque % 1 ? 1 : 0) : ''; // V12
+    VF.tanqueBusca = { chave: v ? chaveBuscaTanque(v.montadora, v.modelo, v.ano) : '', res: null };
+    $('vf-tanque-res').innerHTML = '';
     contarLetrasObs();
     VF.existentes = v ? (await Banco.porIndice('arquivos', 'lancamentoId', v.id)).filter(a => a.tipo === 'foto' && !a.remover) : [];
     VF.fotosNovas = [];
@@ -482,11 +486,13 @@ const Veiculos = (() => {
     const placa = normalizarPlaca($('vf-placa').value);
     const cor = normalizarCor($('vf-cor').value);
     const observacao = $('vf-obs').value.trim().slice(0, 1000);
+    const tanque = lerNumBr($('vf-tanque').value, 1); // V12
     if (!montadora) return erro('Informe a montadora.');
     if (!modelo) return erro('Informe o modelo.');
     if (!/^\d{4}$/.test(anoTexto) || ano < 1900 || ano > anoMaximo) return erro(`Informe o ano com 4 números (de 1900 a ${anoMaximo}).`);
     if (!placa) return erro('Placa inválida. Use o formato ABC1D23 (Mercosul) ou ABC-1234.');
     if (!cor) return erro('Informe a cor do veículo.');
+    if ($('vf-tanque').value.trim() && !(tanque >= 5 && tanque <= 2000)) return erro('Confira a capacidade do tanque (em litros, ex.: 54).');
     const repetida = (await listaVeiculos()).find(x => x.id !== VF.id && x.placa === placa);
     if (repetida && ehMeu(repetida)) return erro(`Você já cadastrou um veículo com a placa ${placa} (${repetida.modelo}).`);
     if (repetida) return erro(`O veículo com a placa ${placa} (${repetida.modelo}) já está na sua lista: ${primeiroNome(repetida.dono) || 'outra pessoa'} compartilhou com você.`);
@@ -494,7 +500,7 @@ const Veiculos = (() => {
     let v = VF.id ? await Banco.obter('veiculos', VF.id) : null;
     if (VF.id && (!v || v.excluirPendente)) { toast('Este veículo não existe mais.'); VF.alterado = false; App().voltar(); return; }
     if (!v) v = { id: novoId(), criadoEm: agora, versaoBase: 0 };
-    Object.assign(v, { montadora, modelo, ano, placa, cor, observacao, alteradoEm: agora, sync: 'pendente' });
+    Object.assign(v, { montadora, modelo, ano, placa, cor, observacao, tanque: tanque || null, alteradoEm: agora, sync: 'pendente' });
     const botao = $('vf-salvar');
     botao.disabled = true;
     try {
@@ -522,6 +528,73 @@ const Veiculos = (() => {
     VF.alterado = false;
     App().voltar();
     App().agendarSync(800);
+  }
+
+  // ---- V12: capacidade do tanque (a IA pesquisa na internet; mostra as fontes) ----
+  function chaveBuscaTanque(montadora, modelo, ano) {
+    const m = String(montadora || '').trim().toLowerCase();
+    const mo = String(modelo || '').trim().toLowerCase();
+    return m && mo && /^\d{4}$/.test(String(ano || '')) ? [m, mo, ano].join('|') : '';
+  }
+  let relogioTanque = null;
+  function agendarBuscaTanque() {
+    clearTimeout(relogioTanque);
+    relogioTanque = setTimeout(() => {
+      const chave = chaveBuscaTanque($('vf-montadora').value, $('vf-modelo').value, $('vf-ano').value);
+      // sozinha: só quando o campo está vazio e o carro mudou
+      if (!chave || chave === VF.tanqueBusca.chave || $('vf-tanque').value.trim() || App().telaAtual() !== 'veiculo-form') return;
+      buscarTanque(false);
+    }, 1500);
+  }
+  async function buscarTanque(pediu) {
+    const montadora = normalizarMontadora($('vf-montadora').value);
+    const modelo = $('vf-modelo').value.replace(/\s+/g, ' ').trim();
+    const ano = $('vf-ano').value.trim();
+    const res = $('vf-tanque-res');
+    const chave = chaveBuscaTanque(montadora, modelo, ano);
+    if (!chave) { if (pediu) res.innerHTML = '<div class="cap-res">Preencha a montadora, o modelo e o ano para buscar.</div>'; return; }
+    if (Sync.conexao() === 'offline') { if (pediu) res.innerHTML = '<div class="cap-res">Sem internet agora. Digite os litros ou busque depois.</div>'; return; }
+    VF.tanqueBusca = { chave, res: null };
+    const nome = `${montadora} ${modelo} ${ano}`;
+    res.innerHTML = `<div class="cap-res"><span class="gira-peq" aria-hidden="true"></span> Procurando a capacidade do tanque do ${esc(nome)}…</div>`;
+    const b = $('vf-buscar-tanque');
+    b.disabled = true;
+    let r;
+    try {
+      r = await Api.chamar('buscarTanque', { montadora, modelo, ano: Number(ano) }, { tempoMs: 60000 });
+    } catch (e) {
+      if (VF.tanqueBusca.chave === chave) res.innerHTML = `<div class="cap-res">${esc(e.codigo === 'acao_desconhecida' ? 'O servidor ainda não tem a busca (precisa atualizar o servidor).' : e.message || 'Não foi possível buscar agora.')} Digite os litros, se souber.</div>`;
+      return;
+    } finally {
+      b.disabled = false;
+    }
+    if (VF.tanqueBusca.chave !== chave || App().telaAtual() !== 'veiculo-form') return;
+    VF.tanqueBusca.res = r;
+    b.textContent = '🔎 Buscar de novo';
+    if (!(r.litros > 0)) {
+      res.innerHTML = `<div class="cap-res">Não achei a capacidade do tanque do ${esc(nome)}. Se souber, digite os litros (ela está no manual do carro).</div>`;
+      return;
+    }
+    const fontes = (r.fontes || []).map(f => `<b>${esc(f)}</b>`);
+    const listaF = fontes.length < 2 ? fontes.join('') : fontes.slice(0, -1).join(', ') + ' e ' + fontes[fontes.length - 1];
+    let h = `<div class="cap-res"><div class="cap-top"><b>${fmtNum(r.litros, r.litros % 1 ? 1 : 0)} litros</b> · ${esc(nome)}</div>` +
+      (fontes.length ? `<div class="cap-fontes">${fontes.length === 1 ? 'Fonte' : 'Fontes'}: ${listaF}.</div>` : '') +
+      (r.nota ? `<div class="cap-fontes">${esc(r.nota)}</div>` : '');
+    h += r.oficial ? `<div class="cap-ok">✓ Está no site oficial da ${esc(montadora)}.</div>`
+      : `<div class="cap-aviso">⚠️ Não achei no site da ${esc(montadora)} (fonte oficial). Se tiver o manual do carro, confira lá.</div>`;
+    // compara com o maior abastecimento já lançado neste veículo
+    if (VF.id) {
+      const maior = (await gastosDo(VF.id)).filter(x => x.tipo === 'abastecimento' && x.combustivel !== 'GNV' && Number(x.litros) > 0)
+        .sort((a, b) => Number(b.litros) - Number(a.litros))[0];
+      if (maior) {
+        h += Number(maior.litros) <= r.litros * 1.1
+          ? `<div class="cap-ok">✓ Combina com os seus abastecimentos: o maior foi de ${fmtNum(maior.litros, 1)} L (${dataCurta(maior.data)}).</div>`
+          : `<div class="cap-aviso">⚠️ Um abastecimento seu foi de ${fmtNum(maior.litros, 1)} L (${dataCurta(maior.data)}), mais do que cabe. Confira a capacidade ou esse abastecimento.</div>`;
+      }
+    }
+    h += `<div class="cap-bts"><button class="botao pequeno primario" type="button" id="vf-usar-tanque">Usar ${fmtNum(r.litros, r.litros % 1 ? 1 : 0)} L</button>` +
+      '<button class="botao pequeno" type="button" id="vf-nao-tanque">Não é esse</button></div></div>';
+    res.innerHTML = h;
   }
 
   function renderFotosVeiculo() {
@@ -567,6 +640,116 @@ const Veiculos = (() => {
   //  Extrato do veículo
   // ------------------------------------------------------------------
   /** autor: primeiro nome de quem lançou (só nos veículos compartilhados); '' para não mostrar. */
+  // ------------------------------------------------------------------
+  //  V12: conferência da bomba (a conta fecha? cabe no tanque? litros demais para o km rodado?)
+  // ------------------------------------------------------------------
+  const CONFERIR = new Set(); // abastecimentos marcados com "🔍 Conferir"
+  const mediana = (l) => { const s = l.slice().sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+  /** Trechos de tanque cheio a tanque cheio: { fim (o abastecimento que fecha), km, litros, n }. */
+  function trechosCheios(regs) {
+    const ab = regs.filter(x => x.tipo === 'abastecimento' && !x.excluirPendente && x.combustivel !== 'GNV' && x.hodometro != null && Number(x.litros) > 0)
+      .sort((a, b) => Number(a.hodometro) - Number(b.hodometro) || compararData(a, b));
+    const lista = [];
+    let ini = -1;
+    ab.forEach((x, i) => {
+      if (!x.tanqueCheio) return;
+      if (ini >= 0) {
+        const parte = ab.slice(ini + 1, i + 1);
+        const km = Number(x.hodometro) - Number(ab[ini].hodometro);
+        const litros = parte.reduce((s, y) => s + Number(y.litros), 0);
+        if (km > 0 && litros > 0) lista.push({ fim: x, inicio: ab[ini], km, litros, n: parte.length });
+      }
+      ini = i;
+    });
+    return lista;
+  }
+
+  function conferenciaBomba(r, v, regs) {
+    const linhas = [];
+    let conferir = false;
+    let dica = '';
+    if (!r || r.tipo !== 'abastecimento') return { linhas, conferir };
+    const un = unidade(r.combustivel);
+    const L = Number(r.litros);
+    const p = Number(r.precoLitro);
+    const total = totalBomba(r);
+    if (p > 0 && L > 0 && total > 0) {
+      const d = difValores(p, L, total);
+      linhas.push(d
+        ? { st: 'atencao', html: `<b>A conta não fecha:</b> ${brl3(p)} × ${fmtNum(L, 3)} ${un} = ${brl(d.conta)}, mas o total foi ${brl(total)}.` }
+        : { st: 'ok', html: `<b>A conta fecha:</b> ${brl3(p)} × ${fmtNum(L, 3)} ${un} = ${brl(total)}.` });
+    }
+    if (r.combustivel === 'GNV' || !(L > 0)) return { linhas, conferir };
+    const cap = Number(v && v.tanque);
+    if (cap > 0) {
+      if (L > cap * 1.1) {
+        conferir = true;
+        linhas.push({ st: 'atencao', html: `<b>Não cabe no tanque:</b> ${fmtNum(L, 1)} L, e o tanque do ${esc(v.modelo)} é de ${fmtNum(cap, cap % 1 ? 1 : 0)} L.` });
+        dica = 'Confira o que a bomba marcou. Se estiver certo, pode ser “bomba baixa”: a bomba marca mais do que coloca.';
+      } else if (L > cap) {
+        linhas.push({ st: 'ok', html: `<b>Cabe no tanque:</b> ${fmtNum(L, 1)} L de ${fmtNum(cap, cap % 1 ? 1 : 0)} L (o tubo do bocal leva um pouco mais).` });
+      } else {
+        linhas.push({ st: 'ok', html: `<b>Cabe no tanque:</b> ${fmtNum(L, 1)} L de ${fmtNum(cap, cap % 1 ? 1 : 0)} L.` });
+      }
+    }
+    // litros demais para o km rodado (só entre dois tanques cheios)
+    if (r.tanqueCheio) {
+      const trechos = trechosCheios(regs);
+      const este = trechos.find(t => t.fim.id === r.id);
+      const outros = trechos.filter(t => t.fim.id !== r.id && t.km >= 50).map(t => t.km / t.litros).filter(k => k > 2 && k < 40);
+      if (este && outros.length >= 2) {
+        const normal = mediana(outros);
+        const esperado = este.km / normal;
+        const desde = dataCurta(este.inicio.data).slice(0, 5);
+        if (este.litros > esperado * 1.25 && este.litros - esperado >= 5) {
+          conferir = true;
+          linhas.push({ st: 'atencao', html: `<b>Litros demais para o km rodado.</b> Desde o último tanque cheio (${desde}) o carro rodou ${fmtKm(este.km)}. ` +
+            `Com o consumo normal do ${esc(v.modelo)} (${fmtNum(normal, 1)} km/L), deviam caber uns <b>${fmtNum(esperado, 1)} L</b>, e ` +
+            (este.n > 1 ? `foram abastecidos <b>${fmtNum(este.litros, 1)} L</b>` : `a bomba marcou <b>${fmtNum(este.litros, 1)} L</b>`) +
+            ` (${fmtNum(este.litros - esperado, 1)} L a mais).` });
+          dica = 'Pode ter entrado menos combustível do que a bomba marcou. Se acontecer de novo no mesmo posto, desconfie da bomba. (Só dá para conferir assim entre dois tanques cheios.)';
+        } else {
+          linhas.push({ st: 'ok', html: `<b>Os litros combinam com o km rodado:</b> ${fmtKm(este.km)} desde o último tanque cheio (${desde}), ` +
+            `${fmtNum(este.km / este.litros, 1)} km/L (o normal do ${esc(v.modelo)} é ${fmtNum(normal, 1)} km/L).` });
+        }
+      }
+    }
+    return { linhas, conferir, dica };
+  }
+
+  function conferenciaHtml(c) {
+    if (!c.linhas.length) return '';
+    return '<div class="conferencia"><h4>🔍 Conferência da bomba</h4>' +
+      c.linhas.map(l => `<div class="conf-lin ${l.st}"><span class="st">${l.st === 'ok' ? '✓' : '⚠️'}</span><span>${l.html}</span></div>`).join('') +
+      (c.dica ? `<div class="conf-dica">${c.dica}</div>` : '') + '</div>';
+  }
+
+  /** Marca os abastecimentos que precisam de conferência (para o selo 🔍 nos cartões). */
+  function marcarConferir(regs, v) {
+    regs.forEach((r) => {
+      if (r.tipo !== 'abastecimento') return;
+      if (conferenciaBomba(r, v, regs).conferir) CONFERIR.add(r.id); else CONFERIR.delete(r.id);
+    });
+  }
+
+  /** No formulário do abastecimento: avisa na hora quando os litros não cabem no tanque. */
+  function atualizarCabe() {
+    const el = $('vr-cabe');
+    if (!el || !VR || VR.r.tipo !== 'abastecimento') return;
+    const cap = Number(VR.veiculo && VR.veiculo.tanque);
+    const L = daMascara($('vr-litros'));
+    if (!(cap > 0) || !(L > 0) || $('vr-combustivel').value === 'GNV' || L <= cap) { el.innerHTML = ''; return; }
+    const c = fmtNum(cap, cap % 1 ? 1 : 0);
+    if (L > cap * 1.1) {
+      el.innerHTML = `<div class="bomba-alerta vermelho"><b>🚫 ${fmtNum(L, 1)} L não cabem no tanque do ${esc(VR.veiculo.modelo)}</b>` +
+        `O tanque é de ${c} L (até uns ${fmtNum(Math.round(cap * 1.1), 0)} L contando o tubo do bocal). Confira o que a bomba marcou. ` +
+        'Se estiver certo, pode ser “bomba baixa”: a bomba marca mais do que coloca.<small>Se salvar assim, o abastecimento fica marcado com 🔍 Conferir.</small></div>';
+    } else {
+      el.innerHTML = `<div class="bomba-alerta leve">⚠️ ${fmtNum(L, 1)} L é um pouco mais que o tanque (${c} L). Pode ser o tubo do bocal; confira o que a bomba marcou.</div>`;
+    }
+  }
+
   function cartaoGasto(r, arqs, avisoKm, comMiniatura, autor, veiculo) {
     const t = TIPOS[r.tipo] || { icone: '•', nome: r.tipo };
     const fotos = arqs.filter(a => a.tipo === 'foto');
@@ -615,6 +798,7 @@ const Veiculos = (() => {
     }
     if (r.status === 'confirmado' && r.autoIA) selos.push('<span class="selo ia" title="Lido pela IA, sem faltar nada">✨ IA</span>'); // V11
     if (r.sync === 'pendente' || arqs.some(a => !a.enviado && a.blob)) selos.push('<span class="selo fila">Na fila</span>');
+    if (CONFERIR.has(r.id)) selos.push('<span class="selo conferir">🔍 Conferir</span>'); // V12: a bomba pode ter marcado mais
     const valor = r.tipo === 'galeria' ? `📷${nFotos > 1 ? ' ' + nFotos : ''}` : brl(r.valor);
     let mini = '';
     if (comMiniatura) {
@@ -664,6 +848,7 @@ const Veiculos = (() => {
       $('vx-lista').innerHTML = '<div class="vazio">Nenhum gasto lançado ainda.<br>Toque no botão <b>+</b> lá embaixo para lançar.</div>';
       return true;
     }
+    marcarConferir(regs, v); // V12
     let html = await cartaoConsumo(v.id, regs); // V11: aviso de consumo caindo
     let mesAtual = '';
     regs.forEach((r) => {
@@ -814,14 +999,30 @@ const Veiculos = (() => {
       L('Seguradora', r.seguradora) + L('Nº da apólice', r.apolice) + L('Validade', r.validade ? dataCurta(r.validade) : '') +
       L('Descrição', r.tipo !== 'abastecimento' && r.descricao && r.descricao !== titulo && primeiraLinha(r.descricao) !== titulo ? r.descricao : '') +
       (r.tipo === 'manutencao' && r.descricao && r.descricao.includes('\n') ? L('Descrição', r.descricao) : '') +
+      L('Pneus trocados', r.tipo === 'manutencao' ? Pneus.textoVer(r) : '') + // V12
       L('Pagamento', r.formaPagamento) + L('Lançado por', autorDe(r.participante) || (r.meu === false ? 'outra pessoa' : 'você')) + '</div>';
     corpo += itensVerHtml(r); // V11: itens da manutenção
+    if (r.tipo === 'abastecimento') corpo += conferenciaHtml(conferenciaBomba(r, v, await gastosDo(v.id))); // V12
     const coord = String(r.local || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
     const lat = r.lat != null ? r.lat : (coord ? Number(coord[1]) : null);
     const lng = r.lng != null ? r.lng : (coord ? Number(coord[2]) : null);
     // V11: o local que veio da nota (SEFAZ ou IA) vale mais que o GPS
     const daNota = !coord && /sefaz|ia/.test(r.fonte || '') && String(r.local || '').indexOf(' — ') > 0; // "Posto — endereço" vem da nota
-    corpo += App().mapaHtml(lat, lng, coord ? '' : r.local, r.local || t.nome, daNota ? 'nota' : '');
+    // V12: sem o GPS, o lugar com esse nome (se já tem o ponto); senão, o mapa procura pelo nome e dá para marcar
+    const catL = Lugares.catDeReg(r);
+    const nomeL = catL ? Lugares.nomeDoLocal(r.local) : '';
+    let latV = lat;
+    let lngV = lng;
+    let deV = daNota ? 'nota' : '';
+    if (latV == null && nomeL && !daNota) {
+      const g = (await Lugares.doNome(nomeL, catL)).find(x => Lugares.temPonto(x));
+      if (g) { latV = g.lat; lngV = g.lng; deV = 'lugar'; } else deV = 'nome';
+    }
+    corpo += App().mapaHtml(latV, lngV, coord ? '' : r.local, r.local || t.nome, deV);
+    if (deV === 'nome') {
+      corpo += '<div class="local-aviso"><span>O lugar exato ainda não foi marcado: o mapa só procura pelo nome.</span>' +
+        '<button class="botao pequeno" type="button" id="ver-marcar-local">📍 Marcar</button></div>';
+    }
     const fotos = arqs.filter(a => a.tipo === 'foto');
     const audios = arqs.filter(a => a.tipo === 'audio');
     if (fotos.length || audios.length) {
@@ -999,6 +1200,7 @@ const Veiculos = (() => {
     $('vl-adicionar').textContent = t.adicionar || '+ Adicionar';
     $('vl-totais').innerHTML = tipo === 'galeria' ? '' : `<div><small>Total</small> <b>${brl(totalDe(regs))}</b></div>`;
     const autorDe = await autores(v, todos);
+    marcarConferir(todos, v); // V12
     $('vl-lista').innerHTML = regs.length
       ? regs.map(r => cartaoGasto(r, arqs[r.id] || [], km.get(r.id), tipo === 'galeria', autorDe(r))).join('')
       : `<div class="vazio">${esc(t.vazio || 'Nada lançado ainda.')}</div>`;
@@ -1094,6 +1296,9 @@ const Veiculos = (() => {
     '<button type="button" class="link-pequeno" id="vr-gps">📍 Usar minha localização</button></div>' +
     '<div class="campo-com-x"><input id="vr-local" autocomplete="off" autocapitalize="sentences" placeholder="Endereço ou nome do lugar">' +
     '<button type="button" class="limpar-campo oculto" id="vr-local-limpar" aria-label="Apagar o local" title="Apagar o local">×</button></div>';
+  // V12: os lugares (postos e oficinas que a pessoa já usou) e a caixa do lugar marcado
+  const HTML_LUGARES = '<div id="vr-lugares"></div><div id="vr-caixa-local"></div>';
+  const HTML_POSTO = HTML_LOCAL.replace('>Local</label>', '>Posto</label>').replace('Endereço ou nome do lugar', 'Nome do posto ou endereço') + HTML_LUGARES;
   function campoDescricaoHtml(rotulo, exemplo) {
     return `<label for="vr-descricao">${rotulo}</label><textarea id="vr-descricao" rows="3" autocapitalize="sentences" placeholder="${exemplo}"></textarea>`;
   }
@@ -1114,6 +1319,7 @@ const Veiculos = (() => {
           '<div id="vr-ia"></div>' +
           '<div id="vr-audios"></div>' +
           '<div id="vr-bloco-fotos" class="oculto"><label>Fotos do abastecimento</label><div class="fotos" id="vr-fotos"></div></div>' +
+          HTML_POSTO + // V12: o posto vem em cima (com os postos que a pessoa já usou)
           '<label for="vr-combustivel">Combustível</label>' +
           '<div class="linha-combustivel"><select id="vr-combustivel"></select>' +
             '<label class="marcar"><input type="checkbox" id="vr-tanque"> Tanque cheio</label></div>' +
@@ -1124,11 +1330,13 @@ const Veiculos = (() => {
             `<div>${campoValorHtml('vr-litros', '<span id="vr-litros-rotulo">Litros</span>', 3)}</div>` +
             `<div>${campoValorHtml('vr-valor', '<span id="vr-valor-rotulo">Valor total</span>', 2, 'R$ 0,00')}</div></div>` +
           '<div class="tres-info" id="vr-tres"></div>' +
+          '<small class="dica-preco" id="vr-preco-dica"></small>' + // V12: o preço do último abastecimento neste posto
+          '<div id="vr-cabe"></div>' + // V12: não cabe no tanque
           // V11: desconto (o valor pago fica total da bomba − desconto)
           '<button type="button" class="link-pequeno" id="vr-tem-desconto">🏷️ Teve desconto?</button>' +
           `<div id="vr-desc-bloco" class="oculto">${campoValorHtml('vr-desconto', 'Desconto (R$) <small class="opcional">(opcional)</small>')}` +
           '<div class="valor-pago" id="vr-pago"></div></div>' +
-          campoDataHtml() + HTML_PAGAMENTO + HTML_LOCAL;
+          campoDataHtml() + HTML_PAGAMENTO;
         break;
       case 'manutencao':
         // V11: nome (opcional) e os itens: quantidade × valor de cada; o total acompanha a soma até a pessoa mudar
@@ -1137,7 +1345,8 @@ const Veiculos = (() => {
           '<textarea id="vr-descricao" rows="1" class="cresce" autocapitalize="sentences" placeholder="Ex.: Revisão dos 115 mil km"></textarea>' +
           '<label>Serviços e peças <small class="opcional">(quantidade × valor de cada)</small></label><div id="vr-itens"></div>' +
           '<button type="button" class="botao pequeno" id="vr-add-item">+ Adicionar item</button>' +
-          campoValorHtml('vr-valor', 'Valor total (R$)') + '<small class="dica" id="vr-soma"></small>' + HTML_LOCAL + HTML_PAGAMENTO;
+          '<div id="vr-pneus"></div>' + // V12: quais pneus foram trocados
+          campoValorHtml('vr-valor', 'Valor total (R$)') + '<small class="dica" id="vr-soma"></small>' + HTML_LOCAL + HTML_LUGARES + HTML_PAGAMENTO;
         break;
       case 'seguro':
         html = campoDataHtml() +
@@ -1192,8 +1401,13 @@ const Veiculos = (() => {
       itens.forEach(i => addItemMan(i));
       if (!itens.length && VR.modo === 'novo') addItemMan({});
       atualizarItensMan();
+      Pneus.iniciarForm({ r, v: VR.veiculo, outros: VR.outros, somenteLeitura: VR.somenteLeitura, aoMudar: () => { VR.alterado = true; } }); // V12
     }
     if ($('vr-local')) { $('vr-local').value = r.local || ''; atualizarXLocal(); }
+    VR.lugar = null;
+    VR.marcadoNoMapa = false;
+    VR.enderecoMapa = '';
+    if ($('vr-lugares')) renderLugaresReg(); // V12
     if ($('vr-km')) $('vr-km').value = textoKm(r.hodometro);
     if ($('vr-seguradora')) {
       $('vr-seguradora').value = r.seguradora || '';
@@ -1230,7 +1444,18 @@ const Veiculos = (() => {
 
   // ---- abastecimento: combustível, último preço, litros e hodômetro ----
   function ultimoPreco(comb) {
-    const r = VR.outros.filter(x => x.tipo === 'abastecimento' && x.combustivel === comb && x.precoLitro > 0).sort(compararData).pop();
+    const todos = VR.outros.filter(x => x.tipo === 'abastecimento' && x.combustivel === comb && x.precoLitro > 0).sort(compararData);
+    VR.precoDica = '';
+    // V12: no posto escolhido, o preço do último abastecimento lá
+    const g = VR.lugar;
+    if (g) {
+      const u = todos.filter(x => (g.cnpj && x.cnpj === g.cnpj) || g.chaves.has(Lugares._normalizar(Lugares.nomeDoLocal(x.local)))).pop();
+      if (u) {
+        VR.precoDica = `🧮 Valor do ${comb === 'GNV' ? 'm³' : 'litro'}: o último que você pagou de ${comb} no ${g.nome} (${dataCurta(u.data)}).`;
+        return u.precoLitro;
+      }
+    }
+    const r = todos.pop();
     return r ? r.precoLitro : null;
   }
   /** O valor do litro vem com o último que a pessoa pagou por esse combustível (ela pode trocar). */
@@ -1305,6 +1530,8 @@ const Veiculos = (() => {
     const el = $('vr-tres');
     if (!el) return;
     atualizarPago(); // V11
+    atualizarCabe(); // V12
+    if ($('vr-preco-dica')) $('vr-preco-dica').textContent = VR.calc.precoLitro === 'pre' ? (VR.precoDica || '') : '';
     const c = VR.calc;
     const T = ['precoLitro', 'litros', 'valor'];
     T.forEach((k) => {
@@ -1398,12 +1625,123 @@ const Veiculos = (() => {
     const c = $('vr-local');
     if (!c) return;
     c.value = '';
+    VR.lugar = null; // V12
+    if ($('vr-lugares')) renderLugaresReg();
     VR.auto.delete('local'); // o GPS que ainda responder não escreve mais aqui
     VR.localPendente = false;
     VR.alterado = true;
     atualizarXLocal();
     c.focus();
   }
+  // ---- V12: lugares no formulário (postos e oficinas que a pessoa já usou; o lugar marcado) ----
+  async function renderLugaresReg() {
+    if (!VR || !$('vr-lugares')) return;
+    const token = VR.token;
+    const cat = Lugares.catDeReg(VR.r);
+    if (!cat) return;
+    const lista = await Lugares.daCategoria(cat);
+    if (!VR || VR.token !== token) return;
+    const nome = Lugares.nomeDoLocal($('vr-local').value);
+    const igual = nome ? lista.find(g => Lugares._normalizar(g.nome) === Lugares._normalizar(nome) || g.chaves.has(Lugares._normalizar(nome))) : null;
+    VR.lugar = igual || null;
+    const det = VR.modo === 'novo' && VR.gps && !VR.marcadoNoMapa ? await Lugares.perto(VR.gps, cat) : null;
+    if (!VR || VR.token !== token) return;
+    $('vr-lugares').innerHTML = VR.somenteLeitura ? '' : Lugares.chipsHtml({
+      lista, marcado: igual ? igual.id : '', detectado: det && (!igual || det.g.id === igual.id) ? det : null,
+      rotulo: cat === 'posto' ? 'Seus postos' : 'Suas oficinas'
+    });
+    // o GPS reconheceu o lugar e a pessoa ainda não escolheu: já preenche
+    if (det && !igual && (VR.auto.has('local') || !$('vr-local').value.trim())) { escolherLugarReg(det.g); return; }
+    renderCaixaLocal();
+  }
+  function escolherLugarReg(g) {
+    const c = $('vr-local');
+    if (!c || !g) return;
+    c.value = g.endereco ? `${g.nome} — ${g.endereco}` : g.nome;
+    atualizarXLocal();
+    VR.auto.delete('local');
+    VR.localPendente = false;
+    VR.lugar = g;
+    if (Lugares.temPonto(g)) VR.gps = { lat: g.lat, lng: g.lng };
+    if (VR.r.tipo === 'abastecimento') { aplicarUltimoPreco(); recalcularTres(null); }
+    renderLugaresReg();
+  }
+  async function tocarLugarReg(id) {
+    const g = await Lugares.porId(id);
+    if (!g || !VR) return;
+    VR.alterado = true;
+    escolherLugarReg(g);
+    if (VR.modo === 'novo' && !Lugares.temPonto(g)) {
+      const pos = await Lugares.talvezGuardarPonto(g);
+      if (pos && VR) { VR.gps = pos; renderLugaresReg(); }
+    }
+  }
+  /** A caixa do lugar: "✓ Lugar marcado no mapa" + endereço + "Mudar no mapa" e "Estou aqui agora". */
+  function renderCaixaLocal() {
+    const el = $('vr-caixa-local');
+    if (!el || !VR) return;
+    const ponto = VR.gps || (VR.r.lat != null ? { lat: VR.r.lat, lng: VR.r.lng } : null);
+    if (!ponto || VR.somenteLeitura) { el.innerHTML = ''; return; }
+    const nome = Lugares.nomeDoLocal($('vr-local').value);
+    const titulo = VR.marcadoNoMapa ? '✓ Lugar marcado no mapa' : VR.lugar && Lugares.temPonto(VR.lugar) ? `✓ ${VR.lugar.nome}: lugar conhecido` : '📍 Lugar pelo GPS';
+    el.innerHTML = `<div class="caixa-local"><span class="ok">${esc(titulo)}</span>` +
+      (VR.enderecoMapa ? `<div class="end">${esc(VR.enderecoMapa)}</div>` : '') +
+      '<div class="linha-botoes"><button class="botao pequeno" type="button" id="vr-mudar-mapa">🗺️ Mudar no mapa</button>' +
+      '<button class="botao pequeno" type="button" id="vr-estou-aqui">📍 Estou aqui agora</button></div></div>' +
+      (VR.marcadoNoMapa && nome ? `<small class="dica-lugar">Da próxima vez que você escrever “${esc(nome)}”, o app já usa este lugar.</small>` : '');
+  }
+  async function mudarLocalNoMapa() {
+    if (!VR) return;
+    const token = VR.token;
+    const ponto = VR.gps || (VR.r.lat != null ? { lat: VR.r.lat, lng: VR.r.lng } : null);
+    const nome = Lugares.nomeDoLocal($('vr-local').value);
+    const p = await Lugares.escolherNoMapa({ titulo: 'Marcar o lugar', sub: nome || TIPOS[VR.r.tipo].nome, lat: ponto && ponto.lat, lng: ponto && ponto.lng });
+    if (!p || !VR || VR.token !== token) return;
+    VR.gps = { lat: p.lat, lng: p.lng };
+    VR.marcadoNoMapa = true;
+    VR.enderecoMapa = p.endereco || '';
+    VR.alterado = true;
+    const c = $('vr-local');
+    if (c && (!c.value.trim() || VR.localPendente || /^\s*-?\d/.test(c.value))) { c.value = p.endereco || textoCoordenadas(p); VR.localPendente = !p.endereco; VR.localCoordenadas = p.endereco ? '' : c.value; atualizarXLocal(); }
+    renderCaixaLocal();
+  }
+  async function estouAquiAgora() {
+    if (!VR) return;
+    const token = VR.token;
+    toast('Buscando a sua localização…', 2500);
+    const pos = await App().obterLocalizacao(15000);
+    if (!VR || VR.token !== token) return;
+    if (!pos) { toast('Não foi possível pegar a localização. Confira se o GPS está ligado e se o app pode usá-lo.', 5000); return; }
+    VR.gps = pos;
+    VR.marcadoNoMapa = true;
+    VR.enderecoMapa = '';
+    VR.alterado = true;
+    renderCaixaLocal();
+    try {
+      const r = await Api.chamar('endereco', { lat: pos.lat, lng: pos.lng }, { tempoMs: 12000 });
+      if (VR && VR.token === token && r.endereco) { VR.enderecoMapa = r.endereco; renderCaixaLocal(); }
+    } catch (e) { /* sem o endereço */ }
+  }
+  /** Ver: "📍 Marcar" o lugar de um gasto que só tem o nome. */
+  async function marcarLocalDoRegistro(id) {
+    const r = id ? await Banco.obter('registros', id) : null;
+    if (!r) return;
+    const cat = Lugares.catDeReg(r);
+    const nome = Lugares.nomeDoLocal(r.local);
+    const p = await Lugares.escolherNoMapa({ titulo: 'Marcar o lugar', sub: nome || r.local || '' });
+    if (!p) return;
+    if (cat && nome) await Lugares.marcarPontoDoNome(nome, cat, p);
+    const v = await veiculoAtivo(r.veiculoId);
+    const atual = await Banco.obter('registros', id);
+    if (atual && v && podeAlterar(atual, v)) {
+      Object.assign(atual, { lat: p.lat, lng: p.lng, alteradoEm: Date.now(), sync: 'pendente' });
+      await Banco.gravar('registros', atual);
+    }
+    toastSalvo('Lugar marcado');
+    await App().abrirVer({ tipo: 'reg', id }, false);
+    App().agendarSync(800);
+  }
+
   function capturarLocal(token, forcar) {
     const campo = $('vr-local');
     if (!campo || !VR) return;
@@ -1420,6 +1758,7 @@ const Veiculos = (() => {
         return;
       }
       VR.gps = pos;
+      if (!forcar && $('vr-lugares')) { await renderLugaresReg(); if (!VR || VR.token !== token || VR.lugar) return; } // V12: "Você está no X"
       if (!forcar && !VR.auto.has('local')) return; // a pessoa já escreveu o local: guarda só as coordenadas
       const coord = textoCoordenadas(pos);
       c.value = coord;
@@ -1830,6 +2169,7 @@ const Veiculos = (() => {
       r.desconto = $('vr-desconto') && !$('vr-desc-bloco').classList.contains('oculto') ? daMascara($('vr-desconto')) : null; // V11
     }
     if (r.tipo === 'manutencao' && $('vr-itens')) r.itens = lerItensMan(); // V11
+    if (r.tipo === 'manutencao' && $('vr-pneus')) r.pneus = Pneus.lerForm(); // V12
     if (r.tipo === 'seguro') {
       r.seguradora = val('vr-seguradora');
       r.apolice = val('vr-apolice');
@@ -1880,6 +2220,15 @@ const Veiculos = (() => {
       if (!(await App().confirmar(`Os três valores não batem: ${textoDifValores(r.precoLitro, r.litros, r.valor, r.combustivel)} ` +
           'Salvar mesmo assim? O lançamento fica marcado com ⚠️.', 'Salvar assim', 'Corrigir'))) return;
     }
+    // V12: o lugar pelo nome (um só com esse nome: usa o ponto dele; mais de um e o GPS não decide: pergunta qual)
+    const catLugar = Lugares.catDeReg(r);
+    const nomeLugar = catLugar ? Lugares.nomeDoLocal(r.local) : '';
+    if (nomeLugar && !VR.marcadoNoMapa && (VR.modo === 'novo' || r.lat == null)) {
+      const p = await Lugares.pontoPeloNome(nomeLugar, catLugar, VR.gps || (r.lat != null ? { lat: r.lat, lng: r.lng } : null));
+      if (p === false) return; // voltou na pergunta: continua no formulário
+      if (p) { VR.gps = { lat: p.lat, lng: p.lng }; if (p.mapa) await Lugares.marcarPontoDoNome(nomeLugar, catLugar, p); }
+    }
+    if (nomeLugar && VR.marcadoNoMapa && VR.gps) await Lugares.marcarPontoDoNome(nomeLugar, catLugar, Object.assign({ endereco: VR.enderecoMapa }, VR.gps));
     // V11: o que fica gravado é o valor pago (total da bomba − desconto)
     if (r.tipo === 'abastecimento' && r.desconto > 0 && r.valor != null) r.valor = arred2(r.valor - r.desconto);
     r.autoIA = false; // a pessoa conferiu: sai o "✨ IA"
@@ -1985,6 +2334,7 @@ const Veiculos = (() => {
     const k = CAMPO[e.target.id];
     if (k) { VR.auto.delete(k); VR.ia.delete(k); }
     if (e.target.id === 'vr-local') { VR.localPendente = false; atualizarXLocal(); } // a pessoa escreveu o local
+    if (e.target.id === 'vr-local' && e.type === 'change') renderLugaresReg(); // V12: o chip do lugar escrito fica marcado
     if (e.target.id === 'vr-combustivel' && e.type === 'change') aoMudarCombustivel();
     if (TRES[e.target.id] && e.type === 'input') recalcularTres(e.target.id);
     if (e.target.id === 'vr-data') atualizarPlaceholderKm();
@@ -1992,7 +2342,8 @@ const Veiculos = (() => {
     // V11
     if (e.target.id === 'vr-desconto') atualizarPago();
     if (e.target.id === 'vr-descricao') crescer(e.target);
-    if (e.target.closest('#vr-itens')) atualizarItensMan();
+    if (e.target.closest('#vr-itens')) { atualizarItensMan(); if (e.target.classList.contains('i-nome')) Pneus.atualizarForm(); } // V12: "Pneu" no item abre os pneus
+    if ((e.target.id === 'vr-km' || e.target.id === 'vr-data') && VR.r.tipo === 'manutencao') Pneus.atualizarForm();
     if (e.target.id === 'vr-valor' && VR.r.tipo === 'manutencao' && e.type === 'input') { VR.totalAuto = !daMascara(e.target); atualizarItensMan(false); }
     marcarFaltando();
   }
@@ -2112,11 +2463,15 @@ const Veiculos = (() => {
       case 'vr-foto': adicionarFotosAbastecimento(); break;
       case 'vr-ler-agora': lerAgora(); break;
       case 'vr-gps': capturarLocal(VR.token, true); break;
+      // V12: lugares
+      case 'vr-mudar-mapa': mudarLocalNoMapa(); break;
+      case 'vr-estou-aqui': estouAquiAgora(); break;
       case 'vr-camera': tirarFotoGaleria(); break;
       // V11
       case 'vr-tem-desconto': mostrarDesconto(true); VR.alterado = true; break;
       case 'vr-add-item': { const d = addItemMan({}); d.querySelector('.i-nome').focus(); VR.alterado = true; break; }
       default:
+        if (b.dataset.lugar && b.closest('#vr-lugares') && !VR.somenteLeitura) { tocarLugarReg(b.dataset.lugar); break; } // V12
         if (b.classList.contains('remover-item')) { b.closest('.item-man').remove(); VR.alterado = true; atualizarItensMan(); break; }
         if (b.dataset.ouvir) ouvirAudio(b);
         else if (b.dataset.removerAudio && !VR.somenteLeitura) removerAudio(b.dataset.removerAudio);
@@ -2271,6 +2626,7 @@ const Veiculos = (() => {
     const porVeiculo = {};
     (await Banco.todos('registros')).filter(r => !r.excluirPendente).forEach((r) => { (porVeiculo[r.veiculoId] = porVeiculo[r.veiculoId] || []).push(r); });
     Object.values(porVeiculo).forEach((lista) => { analisarKm(lista).forEach((v, k) => km.set(k, v)); });
+    Object.keys(porVeiculo).forEach((id) => { if (veiculos.has(id)) marcarConferir(porVeiculo[id], veiculos.get(id)); }); // V12
     return regs.map((r) => {
       const [a, m, d] = String(r.data || '').split('-').map(Number);
       // o gasto de hoje entra na hora em que foi lançado; o de outro dia, ao meio-dia daquele dia
@@ -2389,7 +2745,26 @@ const Veiculos = (() => {
       renderFotosVeiculo();
     });
     $('vf-excluir').onclick = excluirVeiculo;
-    $('tela-veiculo-form').addEventListener('input', () => { VF.alterado = true; $('vf-erro').textContent = ''; });
+    $('tela-veiculo-form').addEventListener('input', (e) => {
+      VF.alterado = true;
+      $('vf-erro').textContent = '';
+      if (['vf-montadora', 'vf-modelo', 'vf-ano'].includes(e.target.id)) agendarBuscaTanque(); // V12
+    });
+    // V12: capacidade do tanque
+    $('vf-buscar-tanque').onclick = () => buscarTanque(true);
+    $('vf-tanque-res').addEventListener('click', (e) => {
+      if (e.target.closest('#vf-usar-tanque') && VF.tanqueBusca.res) {
+        const l = VF.tanqueBusca.res.litros;
+        $('vf-tanque').value = fmtNum(l, l % 1 ? 1 : 0);
+        VF.alterado = true;
+        $('vf-tanque-res').innerHTML = '';
+        toast(`Capacidade do tanque: ${fmtNum(l, l % 1 ? 1 : 0)} L. Toque em Salvar.`);
+      } else if (e.target.closest('#vf-nao-tanque')) {
+        $('vf-tanque-res').innerHTML = '';
+        $('vf-tanque').focus();
+      }
+    });
+    $('vf-tanque').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^\d,]/g, '').slice(0, 6); });
     const placa = $('vf-placa');
     placa.addEventListener('input', () => {
       const v = placa.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 8);
@@ -2427,6 +2802,7 @@ const Veiculos = (() => {
       compartilhado: async (v, regs) => !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false)
     },
     abrirRegistro: (id) => abrirRegistro(id),
+    marcarLocalDoRegistro, // V12
     htmlVer, // V10: tela de ver (app.js)
     // usados nos testes
     _textoMascara: textoMascara, _normalizarPlaca: normalizarPlaca, _analisarKm: analisarKm,

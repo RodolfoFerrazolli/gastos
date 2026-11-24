@@ -23,6 +23,14 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 12', itens: [
+      '🛞 <b>Pneus:</b> na manutenção com pneu, toque no desenho do carro para marcar <b>quais pneus foram trocados</b>. Em <b>Relatório › Pneus</b> você vê desde quando está cada pneu e <b>quanto os trocados duraram</b> (km, tempo e R$ por km). Lembra da última troca? Toque em <b>Informar uma troca antiga</b>.',
+      '⛽ <b>Capacidade do tanque e conferência da bomba:</b> no cadastro do veículo, o app busca a capacidade do tanque na internet e mostra de onde veio. No abastecimento, avisa quando os litros <b>não cabem no tanque</b>, e a tela do abastecimento confere a conta, o tanque e os litros para o km rodado. O que precisa de atenção fica com <b>🔍 Conferir</b>.',
+      '📍 <b>Lugares:</b> o app aprende os postos, oficinas e lugares que você usa. No abastecimento, o posto vem em cima: o GPS reconhece onde você está e os <b>favoritos ⭐</b> aparecem para tocar (com o preço do litro do último abastecimento lá). Dá para <b>marcar o lugar no mapa</b> e corrigir o lugar de uma foto tirada depois. Em <b>Configurações › Meus lugares</b>, os lugares por categoria.',
+      '🔧 <b>Relatório › Gastos:</b> toque numa manutenção com vários itens para ver cada item e o valor.',
+      '🐞 <b>Pedido de melhoria em segundo plano:</b> a janela fecha na hora e o pedido vai com qualquer internet (Wi-Fi ou dados). Sem internet, ele vai sozinho quando ela voltar, <b>mesmo com o app fechado</b>.',
+      '🔍 <b>Zoom na câmera:</b> com dois dedos você aproxima a câmera do app (toque no <b>1,6×</b> para voltar). A tela não aumenta mais inteira e os botões não somem.'
+    ] },
     { titulo: 'Versão 11', itens: [
       '🔧 <b>Manutenção com itens:</b> o botão agora é <b>+ Adicionar manutenção</b>. Dê um nome (opcional) e lance cada serviço ou peça com <b>quantidade × valor de cada</b>. O total vai somando sozinho; se teve desconto, é só mudar o total.',
       '🏷️ <b>Desconto no abastecimento:</b> toque em <b>Teve desconto?</b> e digite o desconto (de app do posto, por exemplo). O app mostra o total da bomba, o desconto, o <b>valor pago</b> e quanto o litro saiu. Pela foto, o desconto da nota já vem preenchido.',
@@ -569,6 +577,7 @@
     const tinhaCamada = !!camada;
     camada = null;
     const devolver = () => { if (!tinhaCamada) history.pushState(estadoTela(), ''); };
+    if (Lugares.mapaAberto()) { Lugares.fecharMapa(); devolver(); return; } // V12: mapa para marcar o lugar
     if (Visor.aberto()) { Visor.fechar(); devolver(); return; }      // foto aberta em tela cheia
     if (Camera.aberta()) { Camera.cancelar(); devolver(); return; }  // câmera do app
     if (Recorte.aberto()) { Recorte.cancelar(); devolver(); return; } // tela de recorte
@@ -584,11 +593,12 @@
       else irParaBase(destino);
       return;
     }
-    if (Grupos.ehTela(telaAtual)) {
-      // telas dos grupos (V9): igual às dos veículos
+    for (const Mod of [Grupos, Lugares]) {
+      // telas dos grupos (V9) e dos lugares (V12): igual às dos veículos
+      if (!Mod.ehTela(telaAtual)) continue;
       const destino = history.state;
-      if (!(await Grupos.podeSair())) { quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); return; }
-      if (destino && Grupos.ehTela(destino.tela)) Grupos.mostrar(destino.tela, destino.dados);
+      if (!(await Mod.podeSair())) { quandoHistoricoPronto(() => history.pushState(estadoTela(), '')); return; }
+      if (destino && Mod.ehTela(destino.tela)) Mod.mostrar(destino.tela, destino.dados);
       else irParaBase(destino);
       return;
     }
@@ -612,6 +622,8 @@
     if (destino && destino.tela === 'ver' && destino.dados) { abrirVer(destino.dados, false); return; } // V10
     if (destino && Veiculos.ehTela(destino.tela)) { Veiculos.mostrar(destino.tela, destino.dados); return; }
     if (destino && Grupos.ehTela(destino.tela)) { Grupos.mostrar(destino.tela, destino.dados); return; }
+    if (destino && Lugares.ehTela(destino.tela)) { Lugares.mostrar(destino.tela, destino.dados); return; } // V12
+    if (destino && destino.tela === 'config') { abrirConfig(false); return; } // V12: voltando de Meus lugares
     if (destino && destino.tela === 'lancamentos') exibirLancamentos(false);
     else exibirInicio();
   }
@@ -809,7 +821,8 @@
     await Banco.limpar('arquivos');
     await Banco.limpar('veiculos');
     await Banco.limpar('registros');
-    for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite', 'grupos']) await Banco.apagar('config', k);
+    for (const k of ['desde', 'ultimaSync', 'ultimoErro', 'iaLimite', 'grupos', 'lugares']) await Banco.apagar('config', k);
+    Lugares.invalidar();
   }
 
   async function concluirEntrada(r, anterior, temp) {
@@ -1459,8 +1472,38 @@
 
   // a localização é registrada sem aparecer na tela
   function capturarGpsForm(token) {
-    obterLocalizacao().then(pos => { if (Form.token === token) Form.gps = pos; });
+    obterLocalizacao().then(pos => { if (Form.token === token) { Form.gps = pos; renderLugaresForm(); } });
   }
+
+  // ---- V12: os lugares da categoria escolhida (e "Você está no X", pelo GPS) ----
+  async function renderLugaresForm() {
+    const caixa = $('f-lugares');
+    if (!caixa || telaAtual !== 'form' && Form.l == null) return;
+    const cat = $('f-cat').value;
+    if (!cat) { caixa.innerHTML = ''; return; }
+    const k = cat === 'Combustível' ? 'posto' : cat;
+    const lista = await Lugares.daCategoria(k);
+    const estab = $('f-estab').value.trim();
+    const marcado = estab ? (lista.find(g => Lugares._normalizar(g.nome) === Lugares._normalizar(estab)) || {}).id : '';
+    const det = Form.modo === 'novo' && Form.gps ? await Lugares.perto(Form.gps, k) : null;
+    const info = Lugares.infoCat(k);
+    caixa.innerHTML = Lugares.chipsHtml({ lista, marcado, detectado: det && (!estab || det.g.id === marcado) ? det : null,
+      rotulo: `Seus lugares de ${k === 'posto' ? 'Combustível' : info.nome}` });
+    if (det && !estab && Form.modo === 'novo') { $('f-estab').value = det.g.nome; Form.lugarId = det.g.id; renderLugaresForm(); }
+  }
+  $('f-cat').addEventListener('change', () => renderLugaresForm());
+  $('f-estab').addEventListener('change', () => renderLugaresForm());
+  $('f-lugares').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-lugar]');
+    if (!b) return;
+    const g = await Lugares.porId(b.dataset.lugar);
+    if (!g) return;
+    $('f-estab').value = g.nome;
+    Form.alterado = true;
+    Form.lugarId = g.id;
+    renderLugaresForm();
+    if (Form.modo === 'novo') { const pos = await Lugares.talvezGuardarPonto(g); if (pos) Form.gps = pos; }
+  });
 
   /** V10: lançamento confirmado abre para ver (o lápis edita); o que precisa de revisão abre direto no formulário. */
   async function abrirLancamento(id) {
@@ -1503,6 +1546,8 @@
     await renderCaixaIA();
     marcarFaltandoLanc(); // V11
     await renderFotosForm();
+    Form.lugarId = null;
+    renderLugaresForm(); // V12
     $('form-salvar').textContent = Form.modo === 'revisar' ? 'Confirmar' : 'Salvar';
     $('form-excluir').classList.toggle('oculto', Form.modo === 'novo');
   }
@@ -1782,6 +1827,16 @@
     });
     if (Form.modo === 'revisar' || (aguardandoIA && completo)) l.status = 'confirmado';
     if (Form.modo === 'novo' && Form.gps) Object.assign(l, Form.gps);
+    // V12: o lugar pelo nome (o app aprende: um lugar só com esse nome usa o ponto dele; mais de um, pergunta qual)
+    if (l.estabelecimento && (Form.modo === 'novo' || l.lat == null) && l.origem !== 'foto') {
+      const p = await Lugares.pontoPeloNome(l.estabelecimento, Lugares.catDeLanc(l), l.lat != null ? { lat: l.lat, lng: l.lng } : null);
+      if (p === false) return; // voltou na pergunta: continua no formulário
+      if (p) {
+        Object.assign(l, { lat: p.lat, lng: p.lng, precisao: null });
+        if (p.endereco) Object.assign(l, { endereco: p.endereco, enderecoDe: 'mapa', enderecoMapa: p.endereco });
+        if (p.mapa) await Lugares.marcarPontoDoNome(l.estabelecimento, Lugares.catDeLanc(l), p);
+      }
+    }
     if (/^(IA|SEFAZ)$/.test(l.alteradoPor || '')) l.alteradoPor = ''; // V11: a pessoa conferiu: sai o "✨ IA"
     l.alteradoEm = Date.now();
     l.sync = 'pendente';
@@ -2103,12 +2158,12 @@
     setTimeout(tentar, 900);
   }
 
-  async function abrirConfig() {
+  async function abrirConfig(empilhar = true) {
     const p = await Perfil.obter();
     if (!p || !p.token) { iniciarBoasVindas(motivoEntrada(p)); return; }
     renderConta(p);
     $('cfg-camera-sistema').checked = prefCameraSistema;
-    mostrarTela('config');
+    mostrarTela('config', { empilhar });
     await renderInfo();
   }
 
@@ -2191,6 +2246,7 @@
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1).replace('.', ',') + ' MB';
     return Math.max(1, Math.round(bytes / 1024)) + ' KB';
   }
+  $('cfg-lugares').onclick = () => Lugares.ir('lugares', {}); // V12
   $('cfg-limpar').onclick = async () => {
     const arqs = (await Banco.todos('arquivos')).filter(a => a.blob && !a.remover);
     const enviados = arqs.filter(a => a.enviado);
@@ -2361,6 +2417,8 @@
       if (telaAtual === 'config') renderInfo();
       if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
       if (Grupos.ehTela(telaAtual)) Grupos.aoSincronizar();
+      Lugares.invalidar(); // V12: os lugares aprendem com o que chegou
+      if (Lugares.ehTela(telaAtual)) Lugares.aoSincronizar();
       buscarPedidos();
       talvezPedirEmail(); // logo depois da atualização para a V5, o servidor avisa aqui que a conta está sem e-mail
       return;
@@ -2530,10 +2588,11 @@
     const daNota = de === 'nota' && !!endereco;
     if (daNota) temGps = false; // o mapa procura o endereço da nota
     const texto = endereco || 'Localização registrada pelo GPS';
-    const origem = daNota ? 'endereço da nota' : !temGps ? '' : de === 'foto' ? 'onde você estava quando tirou a foto (GPS)' : 'pelo GPS';
+    const origem = daNota ? 'endereço da nota' : de === 'nome' && !temGps ? 'procura pelo nome' : !temGps ? '' : de === 'mapa' ? 'marcado no mapa'
+      : de === 'lugar' ? 'lugar marcado' : de === 'foto' ? 'onde você estava quando tirou a foto (GPS)' : 'pelo GPS';
     const busca = daNota && nome && endereco.toLowerCase().indexOf(String(nome).toLowerCase()) < 0 ? nome + ', ' + endereco : endereco;
     return `<button class="ver-mapa" type="button" id="ver-mapa" data-lat="${temGps ? lat : ''}" data-lng="${temGps ? lng : ''}" data-end="${esc(busca || '')}" data-nome="${esc(nome || '')}">` +
-      `<span class="ic" aria-hidden="true">📍</span><span class="tx"><b>${esc(texto)}</b><small>Abrir no mapa${origem ? ` · <i>${esc(origem)}</i>` : ''}</small></span>` +
+      `<span class="ic" aria-hidden="true">${de === 'nome' && !temGps ? '🔎' : '📍'}</span><span class="tx"><b>${esc(texto)}</b><small>Abrir no mapa${origem ? ` · <i>${esc(origem)}</i>` : ''}</small></span>` +
       `<span class="seta" aria-hidden="true">›</span></button>`;
   }
   function linkDoMapa({ lat, lng, endereco, nome }) {
@@ -2570,6 +2629,7 @@
   /** V11: de onde veio o endereço do lançamento ('nota', 'foto' = GPS de quando tirou a foto, ou ''). */
   function deOndeEndereco(l) {
     if (l.enderecoDe === 'nota') return 'nota';
+    if (l.enderecoDe === 'mapa') return 'mapa'; // V12
     const lida = l.origem === 'foto' && /ia|sefaz/.test(l.fonteDados || '');
     if (!l.enderecoDe && lida && l.endereco) return 'nota'; // lançamentos de antes da v11: a nota quase sempre traz o endereço
     return l.origem === 'foto' ? 'foto' : '';
@@ -2586,6 +2646,11 @@
       '<div class="ver-caixa">' + linhaVer('Data e hora', dataTxt) + linhaVer('Categoria', l.categoria) + linhaVer('Pagamento', l.meioPagamento) +
       linhaVer('Banco / titular', banco) + linhaVer('Estabelecimento', l.estabelecimento) + '</div>' +
       mapaHtml(l.lat, l.lng, l.endereco, l.estabelecimento || descricaoLanc(l), deOndeEndereco(l));
+    // V12: foto de um comprovante sem o endereço da loja: o mapa usa o GPS de onde a foto foi tirada (pode ser outro lugar)
+    if (deOndeEndereco(l) === 'foto' && l.lat != null) {
+      corpo += '<div class="local-aviso"><span>A foto era de um comprovante sem o endereço da loja: o mapa mostra onde você estava quando tirou a foto. ' +
+        'Tirou a foto depois, em outro lugar?</span><button class="botao pequeno" type="button" id="ver-corrigir-local">📍 Corrigir</button></div>';
+    }
     const itens = (l.itens || []).filter(i => i.nome || i.valor != null);
     if (itens.length) {
       const soma = itens.reduce((s2, i) => s2 + (Number(i.valor) || 0), 0);
@@ -2627,11 +2692,30 @@
     mostrarTela('ver', { empilhar, dados });
     return true;
   }
+  /** V12: "📍 Corrigir": a pessoa marca no mapa onde a compra foi feita (o app também aprende o lugar). */
+  async function corrigirLocalLanc() {
+    const id = Ver.dados && Ver.dados.id;
+    const l = id ? await Banco.obter('lancamentos', id) : null;
+    if (!l) return;
+    const p = await Lugares.escolherNoMapa({ titulo: 'Onde foi a compra?', sub: l.estabelecimento || descricaoLanc(l), lat: l.lat, lng: l.lng });
+    if (!p) return;
+    const atual = await Banco.obter('lancamentos', id);
+    if (!atual) return;
+    Object.assign(atual, { lat: p.lat, lng: p.lng, precisao: null, endereco: p.endereco || atual.endereco || '', enderecoDe: 'mapa',
+      enderecoMapa: p.endereco || '', alteradoEm: Date.now(), sync: 'pendente' });
+    await Banco.gravar('lancamentos', atual);
+    if (atual.estabelecimento) await Lugares.marcarPontoDoNome(atual.estabelecimento, Lugares.catDeLanc(atual), p);
+    toastSalvo('Lugar corrigido');
+    await abrirVer(Ver.dados, false);
+    agendarSync(800);
+  }
   $('ver-voltar').onclick = () => voltar();
   $('ver-editar').onclick = () => { if (Ver.editar) Ver.editar(); };
   $('ver-corpo').addEventListener('click', (e) => {
     const m = e.target.closest('#ver-mapa');
     if (m) { abrirMapa(m); return; }
+    if (e.target.closest('#ver-corrigir-local')) { corrigirLocalLanc(); return; } // V12
+    if (e.target.closest('#ver-marcar-local')) { Veiculos.marcarLocalDoRegistro(Ver.dados && Ver.dados.id); return; } // V12
     const f = e.target.closest('[data-ver]');
     if (f) { const lista = f.closest('[id]'); abrirVisor(lista ? lista.id : 'ver-fotos', f.dataset.ver); }
   });
@@ -2726,8 +2810,8 @@
 
   // V9: com uma janela aberta (diálogo, menu, foto, câmera ou recorte), a tela de trás não rola
   TravaFundo.vigiar(() => !!$('dialogo').firstElementChild ||
-    ['visor', 'camera', 'recorte'].some((id) => { const el = $(id); return !!el && !el.classList.contains('oculto'); }),
-  [$('dialogo'), $('visor'), $('camera'), $('recorte')]);
+    ['visor', 'camera', 'recorte', 'mapa-lugar'].some((id) => { const el = $(id); return !!el && !el.classList.contains('oculto'); }),
+  [$('dialogo'), $('visor'), $('camera'), $('recorte'), $('mapa-lugar')]);
 
   async function iniciar() {
     try {
