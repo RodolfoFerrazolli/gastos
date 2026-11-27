@@ -23,6 +23,12 @@
   // Histórico das versões (o mais novo primeiro). Aparece em Configurações > "O que há de novo"
   // e abre sozinho uma vez depois de cada atualização.
   const NOVIDADES = [
+    { titulo: 'Versão 13', itens: [
+      '👆 <b>Segure o dedo num lançamento</b> (meio segundo) para <b>✏️ Editar</b> ou <b>🗑️ Excluir</b>. Vale em Lançamentos, nos gastos do veículo e nas despesas do grupo. Excluir sempre pergunta antes. Tocar normal continua abrindo para ver.',
+      '👥 <b>Despesa do grupo: quem não paga.</b> Em <b>Valor individual</b>, toque no valor da pessoa e escolha <b>não paga (R$ 0,00)</b>: ela participou, mas não paga nada. Os outros dividem o total.',
+      '⏳ <b>Ninguém pagou ainda:</b> em <b>Quem pagou?</b>, escolha <b>⏳ Ninguém ainda</b> (ex.: o hotel que só é cobrado no check-in). A despesa fica como <b>A pagar</b>, fora dos Saldos e do Acertar. Quando alguém pagar, abra a despesa e toque em <b>✓ Foi pago</b>.',
+      '🔎 <b>Acertar com filtro:</b> escolha a pessoa e veja só o que ela <b>deve</b> ou o que ela <b>recebe</b>, e se quer ver o que <b>falta pagar</b> ou o que <b>já foi pago</b>.'
+    ] },
     { titulo: 'Versão 12', itens: [
       '🛞 <b>Pneus:</b> na manutenção com pneu, toque no desenho do carro para marcar <b>quais pneus foram trocados</b>. Em <b>Relatório › Pneus</b> você vê desde quando está cada pneu e <b>quanto os trocados duraram</b> (km, tempo e R$ por km). Lembra da última troca? Toque em <b>Informar uma troca antiga</b>.',
       '⛽ <b>Capacidade do tanque e conferência da bomba:</b> no cadastro do veículo, o app busca a capacidade do tanque na internet e mostra de onde veio. No abastecimento, avisa quando os litros <b>não cabem no tanque</b>, e a tela do abastecimento confere a conta, o tanque e os litros para o km rodado. O que precisa de atenção fica com <b>🔍 Conferir</b>.',
@@ -433,10 +439,10 @@
       document.addEventListener('scroll', aoRolar, { capture: true, passive: true });
     });
   }
-  function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar') {
+  function confirmar(msg, sim = 'Confirmar', nao = 'Cancelar', { perigo = false } = {}) {
     return new Promise((ok) => {
       abrirDialogo(`<div class="fundo-dialogo"><div class="dialogo" role="dialog"><p>${esc(msg)}</p>
-        <div class="botoes"><button class="botao" id="dlg-nao">${esc(nao)}</button><button class="botao primario" id="dlg-sim">${esc(sim)}</button></div></div></div>`,
+        <div class="botoes"><button class="botao" id="dlg-nao">${esc(nao)}</button><button class="botao ${perigo ? 'vermelho-cheio' : 'primario'}" id="dlg-sim">${esc(sim)}</button></div></div></div>`,
       () => ok(false));
       const fim = (r) => { fecharDialogo(); ok(r); };
       $('dlg-nao').onclick = () => fim(false);
@@ -1876,9 +1882,9 @@
   }
   $('form-salvar').onclick = salvarForm;
 
-  $('form-excluir').onclick = async () => {
-    if (!await confirmar('Excluir este lançamento?', 'Excluir', 'Cancelar')) return;
-    const l = await Banco.obter('lancamentos', Form.l.id);
+  /** Apaga o lançamento (V13: também usado pelo menu de segurar). */
+  async function excluirLancamentoId(id) {
+    const l = await Banco.obter('lancamentos', id);
     let precisaEnviar = false;
     if (l) {
       if (!l.tentouEnviar && !l.versaoBase) {
@@ -1892,8 +1898,12 @@
     }
     if (precisaEnviar) toastSalvo('Lançamento excluído');
     else toast('Lançamento excluído.');
-    concluirEVoltar();
     agendarSync(800);
+  }
+  $('form-excluir').onclick = async () => {
+    if (!await confirmar('Excluir este lançamento?', 'Excluir', 'Cancelar')) return;
+    await excluirLancamentoId(Form.l.id);
+    concluirEVoltar();
   };
   $('form-voltar').onclick = () => voltar();
 
@@ -2709,6 +2719,96 @@
     await abrirVer(Ver.dados, false);
     agendarSync(800);
   }
+  // ------------------------------------------------------------------
+  //  V13: segurar o dedo num lançamento (meio segundo) abre o menu ✏️ Editar / 🗑️ Excluir.
+  //  O cartão fica em destaque por cima do fundo escuro e o menu aparece colado nele.
+  //  Tocar normal continua abrindo para ver.
+  // ------------------------------------------------------------------
+  let segurouEm = 0;
+  function aoSegurar(el, seletor, fn) {
+    if (!el) return;
+    let relogio = null; let x0 = 0; let y0 = 0;
+    const parar = () => { if (relogio) clearTimeout(relogio); relogio = null; };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button > 0) return;
+      const c = e.target.closest(seletor);
+      if (!c || !el.contains(c) || e.target.closest('[data-aviso]')) return;
+      x0 = e.clientX; y0 = e.clientY;
+      parar();
+      relogio = setTimeout(() => {
+        relogio = null;
+        segurouEm = Date.now();
+        try { if (navigator.vibrate) navigator.vibrate(25); } catch (er) { /* sem vibração */ }
+        fn(c);
+      }, 500);
+    });
+    el.addEventListener('pointermove', (e) => { if (relogio && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) parar(); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => el.addEventListener(n, parar));
+    window.addEventListener('scroll', parar, { passive: true });
+    el.addEventListener('contextmenu', (e) => { if (e.target.closest(seletor)) e.preventDefault(); });
+    // o dedo que acabou de segurar não abre o lançamento ao soltar
+    el.addEventListener('click', (e) => { if (Date.now() - segurouEm < 800) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  }
+  /** opcoes: [{ ic, texto, perigo, desligado, acao }]; nota: texto pequeno embaixo (HTML). */
+  function menuSegurar(cartao, opcoes, nota) {
+    const limpar = () => cartao.classList.remove('seg-alto');
+    cartao.classList.add('seg-alto');
+    abrirDialogo('<div class="fundo-dialogo seg-fundo"><div class="seg-menu" role="menu">' +
+      opcoes.map((o, i) => `<button type="button" role="menuitem" data-i="${i}" class="${o.perigo ? 'perigo' : ''}${o.desligado ? ' desligado' : ''}"` +
+        `${o.desligado ? ' aria-disabled="true"' : ''}><span class="ic" aria-hidden="true">${o.ic}</span>${esc(o.texto)}</button>`).join('') +
+      (nota ? `<div class="seg-nota">${nota}</div>` : '') + '</div></div>', limpar, { fora: true });
+    const m = $('dialogo').querySelector('.seg-menu');
+    const r = cartao.getBoundingClientRect();
+    const alto = m.offsetHeight;
+    const embaixo = r.bottom + 10 + alto < window.innerHeight - 10;
+    m.style.top = Math.max(10, embaixo ? r.bottom + 10 : r.top - 10 - alto) + 'px';
+    m.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-i]');
+      if (!b) return;
+      const o = opcoes[Number(b.dataset.i)];
+      if (o.desligado) return;
+      fecharDialogo();
+      limpar();
+      o.acao();
+    });
+  }
+  /** Depois de excluir pelo menu: desenha de novo a tela que está aberta. */
+  function redesenharDepoisDeExcluir() {
+    if (telaAtual === 'lancamentos' || telaAtual === 'inicio') renderInicio();
+    if (Veiculos.ehTela(telaAtual)) Veiculos.aoSincronizar();
+    if (Grupos.ehTela(telaAtual)) Grupos.aoSincronizar();
+  }
+  async function segurarItem(cartao) {
+    let info = null;
+    if (cartao.dataset.registro) info = await Veiculos.paraSegurar(cartao.dataset.registro);
+    else if (cartao.dataset.gdesp || cartao.dataset.despesa) info = await Grupos.paraSegurar(cartao.dataset.gdesp || cartao.dataset.despesa);
+    else if (cartao.dataset.id) {
+      const l = await Banco.obter('lancamentos', cartao.dataset.id);
+      if (l) {
+        const id = l.id;
+        info = { pode: true, ver: () => abrirLancamento(id), editar: () => editarLancamento(id),
+          pergunta: `Excluir o lançamento “${descricaoLanc(l)}”${l.valorTotal != null ? ' (' + brl(l.valorTotal) + ')' : ''}?`,
+          excluir: () => excluirLancamentoId(id) };
+      }
+    }
+    if (!info) return;
+    const excluir = async () => {
+      if (!(await confirmar(info.pergunta, 'Excluir', 'Cancelar', { perigo: true }))) return;
+      await info.excluir();
+      redesenharDepoisDeExcluir();
+    };
+    if (info.pode) {
+      menuSegurar(cartao, [{ ic: '✏️', texto: 'Editar', acao: info.editar }, { ic: '🗑️', texto: 'Excluir', perigo: true, acao: excluir }]);
+    } else {
+      menuSegurar(cartao, [{ ic: '👁️', texto: 'Ver', acao: info.ver }, { ic: '✏️', texto: 'Editar', desligado: true }, { ic: '🗑️', texto: 'Excluir', desligado: true }],
+        info.nota || 'Só quem lançou (ou o dono do veículo) pode alterar ou excluir.');
+    }
+  }
+  aoSegurar($('lista'), '.cartao[data-id], [data-registro], [data-gdesp]', segurarItem);
+  aoSegurar($('vx-lista'), '[data-registro]', segurarItem);
+  aoSegurar($('vl-lista'), '[data-registro]', segurarItem);
+  aoSegurar($('gx-corpo'), '[data-despesa]', segurarItem);
+
   $('ver-voltar').onclick = () => voltar();
   $('ver-editar').onclick = () => { if (Ver.editar) Ver.editar(); };
   $('ver-corpo').addEventListener('click', (e) => {
@@ -2716,6 +2816,7 @@
     if (m) { abrirMapa(m); return; }
     if (e.target.closest('#ver-corrigir-local')) { corrigirLocalLanc(); return; } // V12
     if (e.target.closest('#ver-marcar-local')) { Veiculos.marcarLocalDoRegistro(Ver.dados && Ver.dados.id); return; } // V12
+    if (e.target.closest('#ver-foi-pago')) { Grupos.foiPago(Ver.dados && Ver.dados.id); return; } // V13
     const f = e.target.closest('[data-ver]');
     if (f) { const lista = f.closest('[id]'); abrirVisor(lista ? lista.id : 'ver-fotos', f.dataset.ver); }
   });

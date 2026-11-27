@@ -118,7 +118,9 @@ const Grupos = (() => {
     const por = {};
     G.pessoas.forEach((p) => { por[p.id] = { pagou: 0, parte: 0, pagos: 0, recebidos: 0, saldo: 0 }; });
     let total = 0;
+    const aPagar = [];
     G.despesas.forEach((d) => {
+      if (d.dados.aPagar) { aPagar.push(d); return; } // V13: ninguém pagou ainda (fica fora dos saldos e do acerto)
       const v = v2c(d.dados.valor);
       total += v;
       if (por[d.dados.pagoPor]) por[d.dados.pagoPor].pagou += v;
@@ -130,7 +132,8 @@ const Grupos = (() => {
       if (por[pg.dados.para]) por[pg.dados.para].recebidos += v;
     });
     Object.values(por).forEach((c) => { c.saldo = c.pagou - c.parte + c.pagos - c.recebidos; });
-    return { total, por, transf: transferencias(G, por) };
+    const totalAPagar = aPagar.reduce((s, d) => s + v2c(d.dados.valor), 0);
+    return { total, por, transf: transferencias(G, por), aPagar, totalAPagar };
   }
   /** O menor número de pagamentos para acertar: quem mais deve paga para quem mais tem a receber. */
   function transferencias(G, por) {
@@ -313,7 +316,9 @@ const Grupos = (() => {
       return n === 1 ? `Só para ${nomeDe(G, partes[0].p, { curto: true })}` : `Dividido igual entre ${n} · ${brl(c2v(v))} cada`;
     }
     const meias = partes.filter(x => x.t === 'meia').length;
-    return `Valor individual entre ${partes.length}` + (meias ? ` · ${plural(meias, '1 meia', '# meias')}` : '');
+    const nada = partes.filter(x => x.t === 'nada');
+    return `Valor individual entre ${partes.length}` + (meias ? ` · ${plural(meias, '1 meia', '# meias')}` : '') +
+      (nada.length === 1 ? ` · ${nomeDe(G, nada[0].p, { curto: true }).replace(' (você)', '')} não paga` : nada.length ? ` · ${nada.length} não pagam` : ''); // V13
   }
   function resumoSaldo(c) {
     if (c.saldo > 0) return `<b class="verde">você recebe ${brl(c2v(c.saldo))}</b>`;
@@ -402,9 +407,9 @@ const Grupos = (() => {
       resumo = '<div class="g-resumo"><div class="linha3">' +
         `<div><small>Total do grupo</small><b>${brl(c2v(C.total))}</b></div>` +
         `<div><small>Sua parte</small><b>${brl(c2v(m.parte))}</b></div>` +
-        `<div><small>Você pagou</small><b>${brl(c2v(m.pagou))}</b></div></div>${saldo}</div>`;
+        `<div><small>Você pagou</small><b>${brl(c2v(m.pagou))}</b></div></div>${linhaAPagar(G, C)}${saldo}</div>`;
     } else {
-      resumo = `<div class="g-resumo"><div class="linha3 um"><div><small>Total do grupo</small><b>${brl(c2v(C.total))}</b></div></div></div>`;
+      resumo = `<div class="g-resumo"><div class="linha3 um"><div><small>Total do grupo</small><b>${brl(c2v(C.total))}</b></div></div>${linhaAPagar(G, C)}</div>`;
     }
     const st = await ler();
     if (st.semServidor) resumo = aviso('O servidor ainda não foi atualizado para os grupos: por enquanto, o grupo fica só neste celular.') + resumo;
@@ -414,6 +419,22 @@ const Grupos = (() => {
     return true;
   }
 
+  /** V13: "⏳ A pagar (1 despesa · sua parte R$ 400,00)   R$ 1.600,00" */
+  function linhaAPagar(G, C) {
+    if (!C.aPagar.length) return '';
+    const minha = G.eu ? C.aPagar.reduce((s, d) => s + (d.dados.partes || []).filter(x => x.p === G.eu.id).reduce((s2, x) => s2 + v2c(x.v), 0), 0) : 0;
+    return `<div class="apagar-lin"><span>⏳ A pagar <small>(${plural(C.aPagar.length, '1 despesa', '# despesas')}${G.eu ? ' · sua parte ' + brl(c2v(minha)) : ''})</small></span>` +
+      `<b>${brl(c2v(C.totalAPagar))}</b></div>`;
+  }
+  function cartaoDespesa(G, d) {
+    const ap = !!d.dados.aPagar;
+    return `<button type="button" class="g-desp${ap ? ' apagar' : ''}" data-despesa="${esc(d.id)}"><span class="ic" aria-hidden="true">${icone(d)}</span>` +
+      `<span class="t"><b>${esc(d.dados.descricao || 'Despesa')}</b>` +
+      (ap ? `<small class="quem">Ninguém pagou ainda · ${esc(dataCurta(d.dados.data))}</small>`
+        : `<small>Pago por <b class="em-linha">${esc(nomeDe(G, d.dados.pagoPor))}</b> · ${esc(dataCurta(d.dados.data))}</small>`) +
+      `<small>${esc(textoDivisao(G, d))}</small></span>` +
+      `<span class="v">${brl(d.dados.valor)}${ap ? '<span class="selo apagar">⏳ A pagar</span>' : ''}${d.pendente ? '<span class="selo fila">Na fila</span>' : ''}</span></button>`;
+  }
   function abaDespesas(G) {
     let html = '';
     if (!G.despesas.length) {
@@ -421,10 +442,8 @@ const Grupos = (() => {
         ? '<div class="vazio">Nenhuma despesa ainda.<br>Primeiro adicione as pessoas do grupo na aba <b>Pessoas</b>.</div>'
         : '<div class="vazio">Nenhuma despesa ainda.<br>Toque em <b>Despesa do grupo</b> para lançar a primeira.</div>';
     }
-    html += G.despesas.map(d => `<button type="button" class="g-desp" data-despesa="${esc(d.id)}"><span class="ic" aria-hidden="true">${icone(d)}</span>` +
-      `<span class="t"><b>${esc(d.dados.descricao || 'Despesa')}</b><small>Pago por <b class="em-linha">${esc(nomeDe(G, d.dados.pagoPor))}</b> · ${esc(dataCurta(d.dados.data))}</small>` +
-      `<small>${esc(textoDivisao(G, d))}</small></span>` +
-      `<span class="v">${brl(d.dados.valor)}${d.pendente ? '<span class="selo fila">Na fila</span>' : ''}</span></button>`).join('');
+    // V13: as "A pagar" ficam no alto
+    html += G.despesas.filter(d => d.dados.aPagar).concat(G.despesas.filter(d => !d.dados.aPagar)).map(d => cartaoDespesa(G, d)).join('');
     return html + '<button type="button" class="g-fab" data-acao="nova-despesa">＋ Despesa do grupo</button>';
   }
 
@@ -442,25 +461,87 @@ const Grupos = (() => {
           `<small>Pagou ${brl(c2v(c.pagou))} · parte ${brl(c2v(c.parte))}${extra}</small>` +
           (c.saldo ? `<div class="g-barra ${cls}" style="width:${larg}%"></div>` : '') + '</div>' +
           `<div class="s ${cls}">${brl(c2v(Math.abs(c.saldo)))}<small>${rot}</small></div></div>`;
-      }).join('') + '<button type="button" class="g-fab" data-acao="relatorio">📊 Ver o relatório do grupo</button>';
+      }).join('') + previstoHtml(G, C) + '<button type="button" class="g-fab" data-acao="relatorio">📊 Ver o relatório do grupo</button>';
+  }
+  /** V13: as despesas que ninguém pagou ainda (fora dos saldos). */
+  function previstoHtml(G, C) {
+    if (!C.aPagar.length) return '';
+    return '<div class="g-prev"><h4>⏳ Previsto, ainda não pago</h4><div class="sub">Fica fora dos saldos e do Acertar até alguém pagar.</div>' +
+      C.aPagar.map((d) => {
+        const partes = d.dados.partes || [];
+        const nomes = partes.filter(x => x.t !== 'nada').map(x => nomeDe(G, x.p, { voce: true, curto: true }));
+        const quem = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : (nomes[0] || '');
+        const valores = partes.filter(x => x.t !== 'nada').map(x => v2c(x.v));
+        const iguais = valores.length > 1 && valores.every(v => v === valores[0]);
+        return `<button type="button" class="lin" data-despesa="${esc(d.id)}"><span>${icone(d)} ${esc(d.dados.descricao || 'Despesa')}` +
+          `<small>${esc(quem)}${iguais ? ' · ' + brl(c2v(valores[0])) + ' cada' : ''}</small></span><b>${brl(d.dados.valor)}</b></button>`;
+      }).join('') + '</div>';
   }
 
+  // V13: filtro do Acertar (por grupo): pessoa ('' = todos), lado (deve | recebe | dois) e mostrar (falta | pagos | tudo)
+  const filtrosAc = {};
+  function filtroAc(grupoId) { return filtrosAc[grupoId] || (filtrosAc[grupoId] = { pessoa: '', lado: 'deve', mostrar: 'tudo' }); }
   function abaAcertar(G, C) {
+    const F = filtroAc(G.g.id);
+    if (F.pessoa && !G.porId[F.pessoa]) F.pessoa = '';
     const pagos = G.pagamentos;
     const faltam = C.transf.reduce((s, t) => s + t.v, 0);
-    let html = '<div class="g-resumo apertado"><div class="linha3">' +
-      `<div><small>Pagamentos</small><b>${pagos.length + C.transf.length}</b></div>` +
-      `<div><small>Já pagos</small><b class="verde">${pagos.length}</b></div>` +
-      `<div><small>Faltam</small><b class="${faltam ? 'vermelho' : 'verde'}">${brl(c2v(faltam))}</b></div></div></div>`;
+    // o filtro (só quando há o que acertar)
+    let filtro = '';
+    if (pagos.length + C.transf.length) {
+      const seg = (campo, itens) => `<div class="g-seg ac-seg" data-n="${itens.length}">` + itens.map(([k, t]) =>
+        `<button type="button" data-acf="${campo}" data-v="${k}" class="${F[campo] === k ? 'on' : ''}${campo === 'lado' ? ' ' + k : ''}">${t}</button>`).join('') + '</div>';
+      const pessoas = G.pessoas.filter(p => participa(G, p.id));
+      const eu = F.pessoa && G.eu && F.pessoa === G.eu.id;
+      filtro = '<div class="ac-filtro"><div class="ac-rot">Pessoa</div><div class="ac-chips">' +
+        `<button type="button" data-acf="pessoa" data-v="" class="${F.pessoa ? '' : 'on'}">Todos</button>` +
+        pessoas.map(p => `<button type="button" data-acf="pessoa" data-v="${esc(p.id)}" class="${F.pessoa === p.id ? 'on' : ''}">${esc(nomeDe(G, p.id, { voce: true, curto: true }))}</button>`).join('') + '</div>' +
+        (F.pessoa ? `<div class="ac-rot">${esc(nomeDe(G, F.pessoa, { voce: true, curto: true }))}</div>` +
+          seg('lado', [['deve', eu ? 'Devo' : 'Deve'], ['recebe', eu ? 'Recebo' : 'Recebe'], ['dois', 'Os dois']]) : '') +
+        '<div class="ac-rot">Mostrar</div>' + seg('mostrar', [['falta', 'Falta pagar'], ['pagos', 'Já pagos'], ['tudo', 'Tudo']]) + '</div>';
+    }
+    let html = filtro;
+    if (F.pessoa) {
+      const P = F.pessoa;
+      const eu = G.eu && P === G.eu.id;
+      const nome = esc(nomeDe(G, P, { voce: true, curto: true }));
+      const soma = (lista, campo, v) => lista.filter(x => x[campo] === P).reduce((s, x) => s + v(x), 0);
+      const pagoDe = soma(pagos.map(pg => pg.dados), 'de', x => v2c(x.valor));
+      const pagoPara = soma(pagos.map(pg => pg.dados), 'para', x => v2c(x.valor));
+      const faltaDe = soma(C.transf, 'de', x => x.v);
+      const faltaPara = soma(C.transf, 'para', x => x.v);
+      const linhas = [];
+      if (F.lado !== 'recebe') {
+        const tot = pagoDe + faltaDe;
+        linhas.push(tot ? `<b class="vermelho">${nome} deve ${brl(c2v(tot))}</b> no total` +
+          `<small>${eu ? 'você já pagou' : 'já pagou'} ${brl(c2v(pagoDe))} · falta pagar ${brl(c2v(faltaDe))}</small>` : `<b>${nome} não deve nada</b>`);
+      }
+      if (F.lado !== 'deve') {
+        const tot = pagoPara + faltaPara;
+        linhas.push(tot ? `<b class="verde">${nome} recebe ${brl(c2v(tot))}</b> no total` +
+          `<small>${eu ? 'você já recebeu' : 'já recebeu'} ${brl(c2v(pagoPara))} · falta receber ${brl(c2v(faltaPara))}</small>` : `<b>${nome} não tem nada a receber</b>`);
+      }
+      html += `<div class="ac-res">${linhas.join('<hr>')}</div>`;
+    } else {
+      html += '<div class="g-resumo apertado"><div class="linha3">' +
+        `<div><small>Pagamentos</small><b>${pagos.length + C.transf.length}</b></div>` +
+        `<div><small>Já pagos</small><b class="verde">${pagos.length}</b></div>` +
+        `<div><small>Faltam</small><b class="${faltam ? 'vermelho' : 'verde'}">${brl(c2v(faltam))}</b></div></div></div>`;
+    }
     if (!G.despesas.length) return html + '<div class="vazio">Nada para acertar ainda.</div>';
+    const entra = (de, para) => !F.pessoa || (F.lado === 'deve' ? de === F.pessoa : F.lado === 'recebe' ? para === F.pessoa : (de === F.pessoa || para === F.pessoa));
     const linha = (de, para, v) => `<div class="de">${avatar(G, G.porId[de] || { id: de, dados: { nome: '?' } })}<b>${esc(nomeDe(G, de, { voce: true, curto: true }))}</b>` +
       `<span class="seta" aria-hidden="true">→</span>${avatar(G, G.porId[para] || { id: para, dados: { nome: '?' } })}<b>${esc(nomeDe(G, para, { voce: true, curto: true }))}</b><span class="v">${brl(c2v(v))}</span></div>`;
-    html += pagos.map(pg => `<button type="button" class="g-pix pago" data-pagamento="${esc(pg.id)}">${linha(pg.dados.de, pg.dados.para, v2c(pg.dados.valor))}` +
+    const listaPagos = F.mostrar === 'falta' ? [] : pagos.filter(pg => entra(pg.dados.de, pg.dados.para));
+    const listaFalta = F.mostrar === 'pagos' ? [] : C.transf.map((t, i) => ({ t, i })).filter(x => entra(x.t.de, x.t.para));
+    const filtrando = F.pessoa || F.mostrar !== 'tudo';
+    html += listaPagos.map(pg => `<button type="button" class="g-pix pago" data-pagamento="${esc(pg.id)}">${linha(pg.dados.de, pg.dados.para, v2c(pg.dados.valor))}` +
       `<div class="ok">✓ Pago${pg.dados.data ? ' em ' + esc(dataCurta(pg.dados.data)) : ''}${pg.dados.marcadoPor ? ' · marcado por ' + esc(primeiroNome(pg.dados.marcadoPor)) : ''}` +
       `${pg.pendente ? ' <span class="selo fila">Na fila</span>' : ''}</div></button>`).join('');
-    html += C.transf.map((t, i) => `<div class="g-pix">${linha(t.de, t.para, t.v)}` +
+    html += listaFalta.map(({ t, i }) => `<div class="g-pix">${linha(t.de, t.para, t.v)}` +
       `<div class="acoes"><button type="button" class="botao pequeno" data-acao="marcar-pago" data-i="${i}">✓ Marcar como pago</button></div></div>`).join('');
-    if (!C.transf.length) html += '<div class="g-ok grande">✓ Tudo acertado: ninguém deve nada.</div>';
+    if (!C.transf.length && !filtrando) html += '<div class="g-ok grande">✓ Tudo acertado: ninguém deve nada.</div>';
+    else if (filtrando && !listaPagos.length && !listaFalta.length) html += '<div class="vazio">Nada aqui com esse filtro.</div>';
     return html + '<button type="button" class="g-fab" data-acao="relatorio">📊 Ver o relatório do grupo</button>';
   }
 
@@ -605,9 +686,10 @@ const Grupos = (() => {
     } else {
       G.pessoas.forEach((p) => { if (!p.dados.crianca) marcados.add(p.id); }); // criança até 6 anos vem desmarcada
     }
-    const pagoPor = d ? d.dados.pagoPor : (G.eu ? G.eu.id : (G.pessoas[0] && G.pessoas[0].id));
+    const aPagar = !!(d && d.dados.aPagar); // V13: ninguém pagou ainda
+    const pagoPor = aPagar ? '' : d ? d.dados.pagoPor : (G.eu ? G.eu.id : (G.pessoas[0] && G.pessoas[0].id));
     const idxPagador = G.pessoas.findIndex(p => p.id === pagoPor);
-    GD = { G, d, id: d ? d.id : null, modo: d ? d.dados.modo : 'igual', pagoPor, marcados, tipos, fixos, todosChips: idxPagador >= CHIPS_VISIVEIS, alterado: false, pop: null };
+    GD = { G, d, id: d ? d.id : null, modo: d ? d.dados.modo : 'igual', pagoPor, aPagar, marcados, tipos, fixos, todosChips: idxPagador >= CHIPS_VISIVEIS, alterado: false, pop: null };
     $('gd-titulo').textContent = d ? 'Despesa do grupo' : 'Nova despesa do grupo';
     $('gd-sub').textContent = G.g.dados.nome;
     const l = await App().listas();
@@ -616,7 +698,7 @@ const Grupos = (() => {
       '<div class="g-precos"><div><label for="gd-valor">Valor total</label>' +
       '<input id="gd-valor" class="caixa-registradora" data-casas="2" inputmode="numeric" autocomplete="off" placeholder="R$ 0,00"></div>' +
       '<div><label for="gd-data">Data</label><button type="button" class="campo-data" id="gd-data"></button></div></div>' +
-      '<label>Quem pagou?</label><div class="g-chips" id="gd-pagou"></div>' +
+      '<label>Quem pagou?</label><div class="g-chips" id="gd-pagou"></div><div id="gd-apagar-dica"></div>' +
       '<div id="gd-forma-caixa"><label for="gd-forma">Forma de pagamento <small class="opcional">(aparece nos seus lançamentos)</small></label><select id="gd-forma"></select></div>' +
       '<label for="gd-cat">Categoria <small class="opcional">(opcional)</small></label><select id="gd-cat"></select>' +
       '<label>Como dividir?</label><div class="g-seg dois" id="gd-modo">' +
@@ -646,9 +728,12 @@ const Grupos = (() => {
     const { G } = GD;
     // quem pagou: os 5 primeiros e "+ N" para ver o resto
     const chips = GD.todosChips ? G.pessoas : G.pessoas.slice(0, CHIPS_VISIVEIS);
-    $('gd-pagou').innerHTML = chips.map(p => `<button type="button" class="${p.id === GD.pagoPor ? 'on' : ''}" data-pagou="${esc(p.id)}">${esc(nomeDe(G, p.id))}</button>`).join('') +
-      (!GD.todosChips && G.pessoas.length > CHIPS_VISIVEIS ? `<button type="button" data-acao="mais-chips">+ ${G.pessoas.length - CHIPS_VISIVEIS}</button>` : '');
-    $('gd-forma-caixa').classList.toggle('oculto', !(G.eu && GD.pagoPor === G.eu.id));
+    $('gd-pagou').innerHTML = chips.map(p => `<button type="button" class="${!GD.aPagar && p.id === GD.pagoPor ? 'on' : ''}" data-pagou="${esc(p.id)}">${esc(nomeDe(G, p.id))}</button>`).join('') +
+      (!GD.todosChips && G.pessoas.length > CHIPS_VISIVEIS ? `<button type="button" data-acao="mais-chips">+ ${G.pessoas.length - CHIPS_VISIVEIS}</button>` : '') +
+      `<button type="button" class="ninguem${GD.aPagar ? ' on' : ''}" data-pagou="__ninguem">⏳ Ninguém ainda</button>`; // V13
+    $('gd-apagar-dica').innerHTML = GD.aPagar ? '<div class="apagar-dica">⏳ Fica como <b>A pagar</b>: aparece na lista do grupo, mas <b>não entra nos Saldos nem no Acertar</b>. ' +
+      'Quando alguém pagar, abra a despesa e toque em <b>✓ Foi pago</b>.</div>' : '';
+    $('gd-forma-caixa').classList.toggle('oculto', GD.aPagar || !(G.eu && GD.pagoPor === G.eu.id));
     $('gd-modo').querySelectorAll('button').forEach((b) => { b.classList.toggle('on', b.dataset.modo === GD.modo); });
     $('gd-rot-lista').innerHTML = GD.modo === 'igual' ? 'Quem participou? <small class="opcional">(desmarque quem não foi)</small>'
       : 'Quem participou e quanto <small class="opcional">(toque no valor para mudar)</small>';
@@ -661,7 +746,8 @@ const Grupos = (() => {
       let val = '<span class="val cinza">—</span>';
       if (on && GD.modo === 'igual') val = `<span class="val">${totalDigitado() ? brl(c2v(x.c)) : '—'}</span>`;
       if (on && GD.modo === 'individual') {
-        const marca = x.t === 'meia' ? '<span class="g-tag t-meia">meia</span>' : x.t === 'fixo' ? '<span class="g-tag t-nome">outro</span>' : '';
+        const marca = x.t === 'meia' ? '<span class="g-tag t-meia">meia</span>' : x.t === 'fixo' ? '<span class="g-tag t-nome">outro</span>'
+          : x.t === 'nada' ? '<span class="g-tag t-naopaga">não paga</span>' : '';
         val = `${marca}<button type="button" class="g-valbtn${GD.pop === p.id ? ' ativo' : ''}" data-valor="${esc(p.id)}">${brl(c2v(x.c))}</button>`;
       }
       let pop = '';
@@ -670,6 +756,7 @@ const Grupos = (() => {
         pop = '<div class="g-pop" role="dialog" aria-label="Valor de ' + esc(p.dados.nome) + '">' +
           `<button type="button" class="${t === 'base' ? 'on' : ''}" data-tipo="base"><small>inteira</small>${div.inteira ? brl(c2v(div.inteira)) : 'Inteira'}</button>` +
           `<button type="button" class="${t === 'meia' ? 'on' : ''}" data-tipo="meia"><small>meia</small>${div.meia ? brl(c2v(div.meia)) : 'Meia'}</button>` +
+          `<button type="button" class="${t === 'nada' ? 'on' : ''}" data-tipo="nada"><small>não paga</small>${brl(0)}</button>` + // V13
           `<span class="g-pop-outro"><input id="gd-outro" class="caixa-registradora" data-casas="2" inputmode="numeric" autocomplete="off" placeholder="R$ outro" aria-label="Outro valor">` +
           '<button type="button" class="botao pequeno primario" data-tipo="fixo">OK</button></span></div>';
       }
@@ -680,6 +767,11 @@ const Grupos = (() => {
       const outro = $('gd-outro');
       if (outro) {
         U().caixaRegistradora(outro);
+        // V13: a caixa não mostra o zero sozinho; guarda que a pessoa digitou 0 (= não paga)
+        outro.addEventListener('beforeinput', (e) => {
+          if (e.data && /^0+$/.test(e.data) && !/[1-9]/.test(outro.value)) outro.dataset.zero = '1';
+          else if (e.data && /[1-9]/.test(e.data)) delete outro.dataset.zero;
+        }, true);
         if (GD.tipos[GD.pop] === 'fixo') outro.value = U().paraMascara(c2v(GD.fixos[GD.pop] || 0), 2);
         outro.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); aplicarTipo('fixo'); } });
       }
@@ -693,8 +785,10 @@ const Grupos = (() => {
       $('gd-conta').innerHTML = `${plural(div.partes.length, '1 pessoa', '# pessoas')} · digite o valor total.`;
     } else {
       const grupos = {};
-      div.partes.forEach((x) => { grupos[x.c] = (grupos[x.c] || 0) + 1; });
-      const conta = Object.keys(grupos).map(Number).sort((a, b) => b - a).map(c => `${grupos[c]} × ${brl(c2v(c))}`).join(' + ');
+      div.partes.filter(x => x.t !== 'nada').forEach((x) => { grupos[x.c] = (grupos[x.c] || 0) + 1; });
+      const naoPagam = div.partes.filter(x => x.t === 'nada').map(x => primeiroNome(G.porId[x.p].dados.nome));
+      const conta = Object.keys(grupos).map(Number).sort((a, b) => b - a).map(c => `${grupos[c]} × ${brl(c2v(c))}`)
+        .concat(naoPagam.length ? [`${naoPagam.length === 1 ? naoPagam[0] + ' não paga' : naoPagam.join(', ') + ' não pagam'} (${brl(0)})`] : []).join(' + ');
       const soma = div.partes.reduce((s, x) => s + x.c, 0);
       const ok = soma === tot;
       const quemNao = fora.length ? ` <small>(${fora.length === 1 ? fora[0] + ' não participou' : fora.length + ' não participaram'})</small>` : '';
@@ -707,9 +801,10 @@ const Grupos = (() => {
     const id = GD.pop;
     if (!id) return;
     if (tipo === 'fixo') {
+      if (!/\d/.test($('gd-outro').value) && !$('gd-outro').dataset.zero) { toast('Digite o valor.'); return; }
       const c = v2c(U().daMascara($('gd-outro')) || 0);
-      if (!c) { toast('Digite o valor.'); return; }
-      GD.fixos[id] = c;
+      if (!c) tipo = 'nada'; // V13: R$ 0,00 = participou, mas não paga
+      else GD.fixos[id] = c;
     }
     GD.tipos[id] = tipo;
     GD.pop = null;
@@ -726,7 +821,11 @@ const Grupos = (() => {
     if (b.id === 'gd-cancelar') { voltar(); return; }
     if (b.id === 'gd-excluir') { excluirDespesa(); return; }
     if (b.dataset.acao === 'mais-chips') { GD.todosChips = true; desenharDespesa(); return; }
-    if (b.dataset.pagou) { GD.pagoPor = b.dataset.pagou; GD.alterado = true; desenharDespesa(); return; }
+    if (b.dataset.pagou) {
+      if (b.dataset.pagou === '__ninguem') GD.aPagar = true; // V13
+      else { GD.aPagar = false; GD.pagoPor = b.dataset.pagou; }
+      GD.alterado = true; desenharDespesa(); return;
+    }
     if (b.dataset.modo) { GD.modo = b.dataset.modo; GD.pop = null; GD.alterado = true; desenharDespesa(); return; }
     if (b.dataset.marcar) {
       const id = b.dataset.marcar;
@@ -747,22 +846,22 @@ const Grupos = (() => {
     if (!descricao) return erro('Escreva a descrição da despesa.');
     if (!tot) return erro('Digite o valor total.');
     if (!data) return erro('Escolha a data.');
-    if (!GD.G.porId[GD.pagoPor]) return erro('Escolha quem pagou.');
+    if (!GD.aPagar && !GD.G.porId[GD.pagoPor]) return erro('Escolha quem pagou.');
     const div = divisaoAtual();
     if (!div.partes.length) return erro('Marque quem participou da despesa.');
     const soma = div.partes.reduce((s, x) => s + x.c, 0);
     if (soma !== tot) return erro('A soma dos valores não fecha com o valor total. Toque nos valores para acertar.');
     const perfil = await Perfil.obter();
-    const souEu = GD.G.eu && GD.pagoPor === GD.G.eu.id;
+    const souEu = !GD.aPagar && GD.G.eu && GD.pagoPor === GD.G.eu.id;
     const dados = {
-      descricao, valor: c2v(tot), data, categoria: $('gd-cat').value, pagoPor: GD.pagoPor,
-      formaPagamento: souEu ? $('gd-forma').value : (GD.d ? GD.d.dados.formaPagamento || '' : ''),
+      descricao, valor: c2v(tot), data, categoria: $('gd-cat').value, pagoPor: GD.aPagar ? '' : GD.pagoPor, aPagar: !!GD.aPagar,
+      formaPagamento: GD.aPagar ? '' : souEu ? $('gd-forma').value : (GD.d ? GD.d.dados.formaPagamento || '' : ''),
       modo: GD.modo, partes: div.partes.map(x => ({ p: x.p, v: c2v(x.c), t: GD.modo === 'igual' ? 'base' : x.t })),
       lancadoPor: GD.d ? GD.d.dados.lancadoPor : ((perfil && perfil.nome) || '')
     };
     await alterar({ id: GD.id || novoId('d'), tipo: 'despesa', grupoId: GD.G.g.id, dados });
     GD.alterado = false;
-    toast(souEu && !GD.d ? 'Despesa salva. Ela entra nos seus lançamentos pelo valor cheio.' : 'Despesa salva.');
+    toast(GD.aPagar ? 'Despesa salva como ⏳ A pagar.' : souEu && !GD.d ? 'Despesa salva. Ela entra nos seus lançamentos pelo valor cheio.' : 'Despesa salva.');
     voltar();
   }
   async function excluirDespesa() {
@@ -872,9 +971,14 @@ const Grupos = (() => {
     const partes = G.pessoas.map(p => C.por[p.id].parte);
     const todosIguais = G.pessoas.length > 1 && partes.every(v => v === partes[0]) && partes[0] > 0;
     let html = '<div class="g-secao">Despesas</div><div class="g-tabela">' +
-      (G.despesas.length ? G.despesas.map(d => `<div><span>${icone(d)} ${esc(d.dados.descricao || 'Despesa')} <small>(${esc(nomeDe(G, d.dados.pagoPor, { curto: true }).replace(' (você)', ''))} · ${esc(dataCurta(d.dados.data))})</small></span><b>${brl(d.dados.valor)}</b></div>`).join('')
+      (G.despesas.length ? G.despesas.filter(d => !d.dados.aPagar).map(d => `<div><span>${icone(d)} ${esc(d.dados.descricao || 'Despesa')} <small>(${esc(nomeDe(G, d.dados.pagoPor, { curto: true }).replace(' (você)', ''))} · ${esc(dataCurta(d.dados.data))})</small></span><b>${brl(d.dados.valor)}</b></div>`).join('')
         : '<div><span class="cinza">Nenhuma despesa ainda.</span></div>') +
       `<div class="total"><span><b>Total</b>${todosIguais ? ' · ' + brl(c2v(partes[0])) + ' por pessoa' : ''}</span><b>${brl(c2v(C.total))}</b></div></div>`;
+    // V13: o que ninguém pagou ainda (fora da conta)
+    if (C.aPagar.length) {
+      html += '<div class="g-secao">⏳ A pagar (fora da conta)</div><div class="g-tabela">' +
+        C.aPagar.map(d => `<div><span>${icone(d)} ${esc(d.dados.descricao || 'Despesa')} <small>(${esc(dataCurta(d.dados.data))})</small></span><b>${brl(d.dados.valor)}</b></div>`).join('') + '</div>';
+    }
     html += '<div class="g-secao">Cada um</div><div class="g-tabela pequena">' + G.pessoas.map((p) => {
       const c = C.por[p.id];
       const s = c.saldo > 0 ? `<b class="verde">recebe ${brl(c2v(c.saldo))}</b>` : c.saldo < 0 ? `<b class="vermelho">deve ${brl(c2v(-c.saldo))}</b>` : '<b class="cinza">quite</b>';
@@ -987,6 +1091,33 @@ const Grupos = (() => {
   // ------------------------------------------------------------------
   //  V10: ver a despesa do grupo antes de editar (o lápis ✏️ abre o formulário)
   // ------------------------------------------------------------------
+  /** V13: "✓ Foi pago": escolhe quem pagou e a despesa vira normal (entra nos saldos). */
+  async function foiPago(id) {
+    const st = await ler();
+    const o = st.objetos[id];
+    const G = o && montarGrupo(st, o.grupoId);
+    if (!G || !o.dados.aPagar) return;
+    const quem = await App().escolher(`Quem pagou? ${o.dados.descricao || 'Despesa'} · ${brl(o.dados.valor)}`,
+      G.pessoas.map(p => ({ texto: nomeDe(G, p.id), valor: p.id })).concat([{ texto: 'Cancelar', valor: null }]));
+    if (!quem) return;
+    await alterar({ id: o.id, tipo: 'despesa', grupoId: o.grupoId, dados: Object.assign({}, o.dados, { aPagar: false, pagoPor: quem }) });
+    toast(G.eu && quem === G.eu.id ? 'Pronto: ela entra nos Saldos e nos seus lançamentos.' : 'Pronto: ela entra nos Saldos e no Acertar.');
+    await App().abrirVer({ tipo: 'gdesp', id: o.id, grupoId: o.grupoId }, false);
+  }
+  /** V13: o menu de segurar a despesa do grupo. */
+  async function paraSegurar(id) {
+    const st = await ler();
+    const o = st.objetos[id];
+    if (!o || o.excluido || o.tipo !== 'despesa') return null;
+    const grupoId = o.grupoId;
+    return {
+      pode: true,
+      ver: () => App().abrirVer({ tipo: 'gdesp', id, grupoId }),
+      editar: () => ir('grupo-despesa', { grupoId, despesaId: id }),
+      pergunta: `Excluir a despesa “${o.dados.descricao || 'Despesa'}” (${brl(o.dados.valor)})? Ela sai do grupo para todas as pessoas.`,
+      excluir: async () => { await excluir([id]); toast('Despesa excluída.'); }
+    };
+  }
   async function htmlVer(id) {
     const G = (await grupos()).find(x => x.despesas.some(d => d.id === id));
     if (!G) return null;
@@ -997,7 +1128,8 @@ const Grupos = (() => {
     partes.forEach((x) => { porPessoa[x.p] = x; });
     const linhas = G.pessoas.map((p) => {
       const x = porPessoa[p.id];
-      const marca = x && x.t === 'meia' ? ' <span class="g-tag t-meia">meia</span>' : x && x.t === 'fixo' && d.dados.modo === 'individual' ? ' <span class="g-tag t-nome">outro</span>' : '';
+      const marca = x && x.t === 'meia' ? ' <span class="g-tag t-meia">meia</span>' : x && x.t === 'fixo' && d.dados.modo === 'individual' ? ' <span class="g-tag t-nome">outro</span>'
+        : x && x.t === 'nada' ? ' <span class="g-tag t-naopaga">não paga</span>' : '';
       const crianca = p.dados.crianca ? ' <span class="g-tag t-nome">criança</span>' : '';
       return `<div class="ver-pes${x ? '' : ' fora'}">${avatar(G, p)}<span class="n">${esc(nomeDe(G, p.id))}${marca}${x ? '' : crianca}</span>` +
         `<span class="v">${x ? brl(x.v) : 'não participou'}</span></div>`;
@@ -1006,7 +1138,11 @@ const Grupos = (() => {
     const fecha = soma === v2c(d.dados.valor);
     const corpo = '<div class="g-conteudo ver-grupo">' +
       `<div class="ver-cab"><div><div class="t">${icone(d)} ${esc(d.dados.descricao || 'Despesa')}</div>` +
-      `<div class="s">Pago por ${esc(nomeDe(G, d.dados.pagoPor))} · ${esc(dataCurta(d.dados.data))}</div></div><div class="v">${brl(d.dados.valor)}</div></div>` +
+      (d.dados.aPagar ? `<div class="s">Ninguém pagou ainda · ${esc(dataCurta(d.dados.data))}</div><div class="ver-apagar"><span class="selo apagar">⏳ A pagar</span></div></div>` +
+        `<div class="v">${brl(d.dados.valor)}</div></div>` +
+        '<div class="foi-pago-caixa"><p>Ainda não entra nos Saldos nem no Acertar. Quando alguém pagar, toque aqui e escolha quem pagou.</p>' +
+        '<button class="botao primario" type="button" id="ver-foi-pago">✓ Foi pago</button></div>'
+        : `<div class="s">Pago por ${esc(nomeDe(G, d.dados.pagoPor))} · ${esc(dataCurta(d.dados.data))}</div></div><div class="v">${brl(d.dados.valor)}</div></div>`) +
       '<div class="ver-caixa">' + L('Categoria', d.dados.categoria) + L('Forma de pagamento', d.dados.formaPagamento) +
       L('Como foi dividido', d.dados.modo === 'individual' ? 'Valor individual' : 'Igual') + L('Lançada por', primeiroNome(d.dados.lancadoPor) || '') + '</div>' +
       `<div class="ver-secao">Quem participou</div><div class="ver-caixa">${linhas}</div>` +
@@ -1035,9 +1171,17 @@ const Grupos = (() => {
       renderGrupo(id);
     });
     $('tela-grupo').addEventListener('click', (e) => {
-      const el = e.target.closest('[data-acao],[data-despesa],[data-pessoa],[data-pagamento]');
+      const el = e.target.closest('[data-acao],[data-despesa],[data-pessoa],[data-pagamento],[data-acf]');
       if (!el) return;
       const grupoId = dadosAtuais().grupoId;
+      if (el.dataset.acf) { // V13: filtro do Acertar
+        const F = filtroAc(grupoId);
+        F[el.dataset.acf] = el.dataset.v;
+        const x = el.closest('.ac-chips');
+        const rol = x ? x.scrollLeft : 0;
+        renderGrupo(grupoId).then(() => { const c = document.querySelector('#gx-corpo .ac-chips'); if (c) c.scrollLeft = rol; });
+        return;
+      }
       if (el.dataset.despesa) { App().abrirVer({ tipo: 'gdesp', id: el.dataset.despesa, grupoId }); return; } // V10
       if (el.dataset.pessoa) { ir('grupo-pessoa', { grupoId, pessoaId: el.dataset.pessoa }); return; }
       if (el.dataset.pagamento) { desfazerPagamento(el.dataset.pagamento); return; }
@@ -1073,7 +1217,7 @@ const Grupos = (() => {
 
   return {
     ehTela, mostrar, podeSair, aoSincronizar, ir, abrirLista, abrirDoLancamento, abrirSaldos, abaAtual,
-    paraInicio, resumoInicio, cartaoLancamentos, sincronizar, pendentes, htmlVer,
+    paraInicio, resumoInicio, cartaoLancamentos, sincronizar, pendentes, htmlVer, foiPago, paraSegurar, // V13
     // usados nos testes
     _dividir: dividir, _calcular: calcular, _transferencias: transferencias
   };

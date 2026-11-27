@@ -2,7 +2,7 @@
 //  SERVICE WORKER — permite abrir o app sem internet.
 //  Ao publicar uma versão nova dos arquivos, aumente o número abaixo.
 // =====================================================================
-const VERSAO = 'gastos-v12';
+const VERSAO = 'gastos-v13';
 // V12: o envio dos pedidos de melhoria continua aqui, mesmo com o app fechado (quando a internet voltar)
 try { importScripts('./config.js', './pedidos-fundo.js'); } catch (e) { /* sem o envio em segundo plano */ }
 const ARQUIVOS = [

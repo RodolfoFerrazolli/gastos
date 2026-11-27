@@ -2296,6 +2296,43 @@ const Veiculos = (() => {
     App().agendarSync(800);
   }
 
+  /** V13: o menu de segurar o gasto do veículo (listas e Lançamentos). */
+  async function paraSegurar(id) {
+    const r = await Banco.obter('registros', id);
+    if (!r || r.excluirPendente) return null;
+    const v = await veiculoAtivo(r.veiculoId);
+    if (!v) return null;
+    const t = TIPOS[r.tipo] || { isto: 'este gasto' };
+    const pode = podeAlterar(r, v);
+    const quem = autorDe(r.participante) || primeiroNome(r.participante) || 'outra pessoa';
+    return {
+      pode,
+      ver: () => abrirRegistro(id),
+      editar: () => ir('v-registro', { registroId: id }),
+      pergunta: `Excluir ${t.isto}${r.valor != null && r.valor !== '' ? ' (' + brl(r.valor) + ')' : ''}?`,
+      excluir: () => apagarRegistro(id),
+      nota: `👤 Lançado por <b>${esc(quem)}</b>. Só quem lançou (ou o dono do veículo) pode alterar ou excluir.`
+    };
+  }
+  /** Apaga o gasto do veículo (o que nunca foi enviado sai daqui; o resto vai para o servidor como excluído). */
+  async function apagarRegistro(id) {
+    const r = await Banco.obter('registros', id);
+    let precisaEnviar = false;
+    if (r) {
+      if (!r.tentouEnviar && !r.versaoBase) {
+        await Sync.apagarLocal(r.id, 'registros');
+      } else {
+        r.excluirPendente = true;
+        r.alteradoEm = Date.now();
+        await Banco.gravar('registros', r);
+        precisaEnviar = true;
+      }
+    }
+    if (precisaEnviar) toastSalvo('Excluído');
+    else toast('Excluído.');
+    App().agendarSync(800);
+  }
+
   async function excluirRegistro() {
     if (VR.somenteLeitura) return;
     const t = TIPOS[VR.r.tipo];
@@ -2802,6 +2839,7 @@ const Veiculos = (() => {
       compartilhado: async (v, regs) => !ehMeu(v) || (await compartilhamentosDe(v.id)).length > 0 || regs.some(r => r.meu === false)
     },
     abrirRegistro: (id) => abrirRegistro(id),
+    paraSegurar, // V13
     marcarLocalDoRegistro, // V12
     htmlVer, // V10: tela de ver (app.js)
     // usados nos testes
